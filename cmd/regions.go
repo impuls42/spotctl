@@ -1,11 +1,11 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/rackspace-spot/spotctl/internal"
-	config "github.com/rackspace-spot/spotctl/pkg"
+	"github.com/rackspace-spot/spotctl/internal/app"
+	featregions "github.com/rackspace-spot/spotctl/internal/features/regions"
 	"github.com/spf13/cobra"
 )
 
@@ -20,16 +20,11 @@ var regionsListCmd = &cobra.Command{
 	Short: "List regions",
 	Long:  `List all regions.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.GetCLIEssentials(cmd)
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{})
 		if err != nil {
 			return err
 		}
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
-		if err != nil {
-			return fmt.Errorf("%w", err)
-		}
-
-		regions, err := client.GetAPI().ListRegions(context.Background())
+		regions, err := featregions.List(cmd.Context(), appCtx)
 		if err != nil {
 			return fmt.Errorf("%w", err)
 		}
@@ -46,20 +41,15 @@ var regionsGetCmd = &cobra.Command{
 		if name == "" {
 			return fmt.Errorf("name is required")
 		}
-		cfg, err := config.GetCLIEssentials(cmd)
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{})
 		if err != nil {
 			return err
 		}
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
+		region, err := featregions.Get(cmd.Context(), appCtx, name)
 		if err != nil {
 			return fmt.Errorf("%w", err)
 		}
-
-		regions, err := client.GetAPI().GetRegion(context.Background(), name)
-		if err != nil {
-			return fmt.Errorf("%w", err)
-		}
-		return internal.OutputData(regions, outputFormat)
+		return internal.OutputData(region, outputFormat)
 	},
 }
 

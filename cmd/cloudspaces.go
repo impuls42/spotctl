@@ -17,13 +17,14 @@ import (
 	"github.com/google/uuid"
 	rxtspot "github.com/rackspace-spot/spot-go-sdk/api/v1"
 	"github.com/rackspace-spot/spotctl/internal"
+	"github.com/rackspace-spot/spotctl/internal/app"
+	featcloudspaces "github.com/rackspace-spot/spotctl/internal/features/cloudspaces"
 	"github.com/rackspace-spot/spotctl/internal/ui"
 	config "github.com/rackspace-spot/spotctl/pkg"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
 	"gopkg.in/yaml.v3"
-	"k8s.io/klog/v2"
 )
 
 type interactiveModel struct {
@@ -116,23 +117,13 @@ var cloudspacesListCmd = &cobra.Command{
 	Short: "List cloudspaces",
 	Long:  `List all cloudspaces in an organization.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.GetCLIEssentials(cmd)
 		org, _ := cmd.Flags().GetString("org")
-		if org == "" {
-			if err == nil && cfg.Org != "" {
-				org = cfg.Org
-			}
-		}
-		if org == "" {
-			return fmt.Errorf("organization not specified (use --org or run 'spotcli configure')")
-		}
-
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{Org: org, RequireOrg: true})
 		if err != nil {
-			return fmt.Errorf("%w", err)
+			return err
 		}
 
-		cloudspaces, err := client.GetAPI().ListCloudspaces(context.Background(), org)
+		cloudspaces, err := featcloudspaces.List(cmd.Context(), appCtx, appCtx.Org)
 		if err != nil {
 			return fmt.Errorf("%w", err)
 		}
@@ -151,19 +142,7 @@ var cloudspacesDeleteCmd = &cobra.Command{
 		if name == "" {
 			return fmt.Errorf("name is required")
 		}
-		cfg, err := config.GetCLIEssentials(cmd)
-		if err != nil {
-			return err
-		}
 		org, _ := cmd.Flags().GetString("org")
-		if org == "" {
-			if err == nil && cfg.Org != "" {
-				org = cfg.Org
-			}
-		}
-		if org == "" {
-			return fmt.Errorf("organization not specified (use --org or run 'spotcli configure')")
-		}
 		yes, _ := cmd.Flags().GetBool("yes")
 		if !yes {
 			// Interactive prompt
@@ -177,12 +156,12 @@ var cloudspacesDeleteCmd = &cobra.Command{
 				return nil
 			}
 		}
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{Org: org, RequireOrg: true})
 		if err != nil {
-			return fmt.Errorf("failed to create client: %w", err)
+			return err
 		}
 
-		err = client.GetAPI().DeleteCloudspace(context.Background(), org, name)
+		err = featcloudspaces.Delete(cmd.Context(), appCtx, appCtx.Org, name)
 		if err != nil {
 			if rxtspot.IsNotFound(err) {
 				return fmt.Errorf("cloudspace '%s' not found", name)
@@ -219,17 +198,12 @@ var cloudspacesCreateCmd = &cobra.Command{
 			fmt.Println("\n\nOperation cancelled by user")
 			cancel()
 		}()
-		// Get CLI configuration
-		cfg, err := config.GetCLIEssentials(cmd)
+		appCtx, err := app.Load(ctx, app.LoadOptions{})
 		if err != nil {
-			return fmt.Errorf("failed to get CLI configuration: %w", err)
+			return err
 		}
-
-		// Initialize client
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
-		if err != nil {
-			return fmt.Errorf("failed to initialize client: %w", err)
-		}
+		cfg := appCtx.Config
+		client := appCtx.Client
 
 		// Check if we're in interactive mode
 		interactive := isInteractiveMode(cmd)
@@ -251,11 +225,11 @@ var cloudspacesCreateCmd = &cobra.Command{
 		}
 
 		// Set default values
-		if params.Org == "" && cfg.Org != "" {
-			params.Org = cfg.Org
+		if params.Org == "" {
+			params.Org = appCtx.Org
 		}
-		if params.Region == "" && cfg.Region != "" {
-			params.Region = cfg.Region
+		if params.Region == "" {
+			params.Region = appCtx.Region
 		}
 		if !isValidRegion(params.Region) {
 			return fmt.Errorf("region %s is not valid. Available regions: %s, %s, %s, %s, %s, %s, %s, %s", params.Region, US_CENTRAL_ORD_1, HKG_HKG_1, AUS_SYD_1, UK_LON_1, US_EAST_IAD_1, US_CENTRAL_DFW_1, US_CENTRAL_DFW_2, US_WEST_SJC_1)
@@ -273,107 +247,48 @@ var cloudspacesCreateCmd = &cobra.Command{
 			// Continue with creation
 		}
 
-		// Create cloudspace with all required fields
-		cloudspace := rxtspot.CloudSpace{
+		// Map CLI params into shared feature params.
+		featParams := featcloudspaces.CreateParams{
 			Name:                 params.Name,
 			Org:                  params.Org,
 			Region:               params.Region,
 			KubernetesVersion:    params.KubernetesVersion,
-			CNI:                  params.CNI,
 			PreemptionWebhookURL: params.PreemptionWebhookURL,
+			CNI:                  params.CNI,
 		}
-
-		if err := client.GetAPI().CreateCloudspace(ctx, cloudspace); err != nil {
-			return fmt.Errorf("failed to create cloudspace: %w", err)
-		}
-		// Create spot node pools if any
 		for _, pool := range params.SpotNodePools {
-			// Check if context was cancelled before each pool creation
-			select {
-			case <-ctx.Done():
-				// Clean up the cloudspace if we're cancelled mid-creation
-				if err := client.GetAPI().DeleteCloudspace(ctx, params.Org, params.Name); err != nil {
-					klog.Warningf("Failed to clean up cloudspace after cancellation: %v", err)
-				}
-				return fmt.Errorf("operation cancelled during spot pool creation")
-			default:
-				// Continue with pool creation
-			}
-
-			if pool.Name == "" {
-				pool.Name = uuid.NewString()
-			}
-
-			spotPool := rxtspot.SpotNodePool{
+			featParams.SpotNodePools = append(featParams.SpotNodePools, featcloudspaces.SpotNodePoolParams{
 				Name:        pool.Name,
-				Org:         params.Org,
-				Cloudspace:  params.Name,
 				ServerClass: pool.ServerClass,
+				Desired:     pool.Desired,
 				BidPrice:    pool.BidPrice,
-				Desired:     pool.Desired,
-			}
-
-			err := handleSpotNodePoolCreation(ctx, client, params.Org, params.Name, spotPool)
-			if err != nil {
-				return err
-			}
+				Labels:      pool.CustomLabels,
+				Annotations: pool.CustomAnnotations,
+			})
 		}
-
-		// Create on-demand node pools if any
 		for _, pool := range params.OnDemandNodePools {
-			// Check if context was cancelled before each pool creation
-			select {
-			case <-ctx.Done():
-				// Clean up the cloudspace if we're cancelled mid-creation
-				if err := client.GetAPI().DeleteCloudspace(ctx, params.Org, params.Name); err != nil {
-					klog.Warningf("Failed to clean up cloudspace after cancellation: %v", err)
-				}
-				return fmt.Errorf("operation cancelled during on-demand pool creation")
-			default:
-				// Continue with pool creation
-			}
-
-			if pool.Name == "" {
-				pool.Name = uuid.NewString()
-			}
-			onDemandPool := rxtspot.OnDemandNodePool{
+			featParams.OnDemandNodePools = append(featParams.OnDemandNodePools, featcloudspaces.OnDemandNodePoolParams{
 				Name:        pool.Name,
-				Org:         params.Org,
-				Cloudspace:  params.Name,
 				ServerClass: pool.ServerClass,
 				Desired:     pool.Desired,
-			}
-
-			err := handleOnDemandNodePoolCreation(ctx, client, params.Org, params.Name, onDemandPool)
-			if err != nil {
-				return err
-			}
+				Labels:      pool.CustomLabels,
+				Annotations: pool.CustomAnnotations,
+			})
 		}
 
-		cloudspaceGetResponse, err := client.GetAPI().GetCloudspace(ctx, params.Org, params.Name)
+		cloudspaceGetResponse, err := featcloudspaces.Create(ctx, appCtx, featParams)
 		if err != nil {
-			return fmt.Errorf("failed to get cloudspace: %w", err)
+			return err
 		}
 
 		fmt.Printf("\n%s Successfully created cloudspace %s with kubernetes version %s in region %s\n",
 			color.GreenString("✓"),
-			color.CyanString(cloudspaceGetResponse.Name),
-			color.CyanString(cloudspaceGetResponse.KubernetesVersion),
-			color.CyanString(cloudspaceGetResponse.Region),
+			color.CyanString(params.Name),
+			color.CyanString(params.KubernetesVersion),
+			color.CyanString(params.Region),
 		)
 
-		// Check if context was cancelled before final output
-		select {
-		case <-ctx.Done():
-			// Clean up the cloudspace if we're cancelled at the last moment
-			if err := client.GetAPI().DeleteCloudspace(ctx, params.Org, params.Name); err != nil {
-				klog.Warningf("Failed to clean up cloudspace after cancellation: %v", err)
-			}
-			return fmt.Errorf("operation cancelled during finalization")
-		default:
-			// Output the created cloudspace details
-			return internal.OutputData(cloudspaceGetResponse, outputFormat)
-		}
+		return internal.OutputData(cloudspaceGetResponse, outputFormat)
 	},
 }
 
@@ -419,26 +334,13 @@ var cloudspacesGetCmd = &cobra.Command{
 		if name == "" {
 			return fmt.Errorf("name is required")
 		}
-
-		cfg, err := config.GetCLIEssentials(cmd)
-		if err != nil {
-			return fmt.Errorf("failed to get config: %w", err)
-		}
-
 		org, _ := cmd.Flags().GetString("org")
-		if org == "" && cfg != nil && cfg.Org != "" {
-			org = cfg.Org
-		}
-		if org == "" {
-			return fmt.Errorf("organization not specified (use --org or run 'spotcli configure')")
-		}
-
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{Org: org, RequireOrg: true})
 		if err != nil {
-			return fmt.Errorf("failed to initialize client: %w", err)
+			return err
 		}
 
-		cloudspace, err := client.GetAPI().GetCloudspace(context.Background(), org, name)
+		cloudspace, err := featcloudspaces.Get(cmd.Context(), appCtx, appCtx.Org, name)
 		if err != nil {
 			if rxtspot.IsNotFound(err) {
 				return fmt.Errorf("cloudspace '%s' not found", name)
@@ -463,17 +365,10 @@ var cloudspacesGetConfigCmd = &cobra.Command{
 	Short: "Get cloudspace/kubernetes config",
 	Long:  `Get config for a specific cloudspace.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-
-		cfg, err := config.GetCLIEssentials(cmd)
-
 		org, _ := cmd.Flags().GetString("org")
-		if org == "" {
-			if err == nil && cfg.Org != "" {
-				org = cfg.Org
-			}
-		}
-		if org == "" {
-			return fmt.Errorf("organization not specified (use --org or run 'spotcli configure')")
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{Org: org, RequireOrg: true})
+		if err != nil {
+			return err
 		}
 
 		name, _ := cmd.Flags().GetString("name")
@@ -488,12 +383,7 @@ var cloudspacesGetConfigCmd = &cobra.Command{
 		} else {
 			filePath = fileName + "/" + name + ".yaml"
 		}
-
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
-		if err != nil {
-			return fmt.Errorf("%w", err)
-		}
-		k8sConfig, err := client.GetAPI().GetCloudspaceConfig(context.Background(), org, name)
+		k8sConfig, err := featcloudspaces.GetConfig(cmd.Context(), appCtx, appCtx.Org, name)
 		if err != nil {
 			return fmt.Errorf("%w", err)
 		}

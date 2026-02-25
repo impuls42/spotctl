@@ -1,0 +1,9 @@
+{
+  "setup-worktree": [
+    "npm install"
+  ],
+  "go-app-worktree": [
+    "go mod tidy",
+    "go build ./..."
+  ]
+}

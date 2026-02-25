@@ -1,11 +1,11 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/rackspace-spot/spotctl/internal"
-	config "github.com/rackspace-spot/spotctl/pkg"
+	"github.com/rackspace-spot/spotctl/internal/app"
+	featserverclasses "github.com/rackspace-spot/spotctl/internal/features/serverclasses"
 	"github.com/spf13/cobra"
 )
 
@@ -21,25 +21,12 @@ var serverclassesListCmd = &cobra.Command{
 	Short: "List serverclasses",
 	Long:  `List all serverclasses.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-
-		cfg, err := config.GetCLIEssentials(cmd)
+		region, _ := cmd.Flags().GetString("region")
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{Region: region, RequireRegion: true})
 		if err != nil {
 			return err
 		}
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
-		if err != nil {
-			return fmt.Errorf("%w", err)
-		}
-
-		region, _ := cmd.Flags().GetString("region")
-		if region == "" {
-			region = cfg.Region
-		}
-		if !isValidRegion(region) {
-			return fmt.Errorf("region %s is not valid. Available regions: %s, %s, %s, %s, %s, %s, %s, %s", region, US_CENTRAL_ORD_1, HKG_HKG_1, AUS_SYD_1, UK_LON_1, US_EAST_IAD_1, US_CENTRAL_DFW_1, US_CENTRAL_DFW_2, US_WEST_SJC_1)
-		}
-
-		serverclasses, err := client.GetAPI().ListServerClasses(context.Background(), region)
+		serverclasses, err := featserverclasses.List(cmd.Context(), appCtx, appCtx.Region)
 		if err != nil {
 			return fmt.Errorf("%w", err)
 		}
@@ -55,20 +42,15 @@ var serverclassesGetCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name, _ := cmd.Flags().GetString("name")
 
-		cfg, err := config.GetCLIEssentials(cmd)
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{})
 		if err != nil {
 			return err
 		}
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
+		serverclass, err := featserverclasses.Get(cmd.Context(), appCtx, name)
 		if err != nil {
 			return fmt.Errorf("%w", err)
 		}
-
-		serverclasses, err := client.GetAPI().GetServerClass(context.Background(), name)
-		if err != nil {
-			return fmt.Errorf("%w", err)
-		}
-		return internal.OutputData(serverclasses, outputFormat)
+		return internal.OutputData(serverclass, outputFormat)
 	},
 }
 

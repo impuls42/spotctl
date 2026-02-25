@@ -1,11 +1,11 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/rackspace-spot/spotctl/internal"
-	config "github.com/rackspace-spot/spotctl/pkg"
+	"github.com/rackspace-spot/spotctl/internal/app"
+	featorgs "github.com/rackspace-spot/spotctl/internal/features/organizations"
 	"github.com/spf13/cobra"
 )
 
@@ -23,16 +23,11 @@ var organizationsListCmd = &cobra.Command{
 	Short: "List organizations",
 	Long:  `List all organizations accessible by the authenticated user.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.GetCLIEssentials(cmd)
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{})
 		if err != nil {
 			return err
 		}
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
-		if err != nil {
-			return fmt.Errorf("%w", err)
-		}
-
-		orgs, err := client.GetAPI().ListOrganizations(context.Background())
+		orgs, err := featorgs.List(cmd.Context(), appCtx)
 		if err != nil {
 			return fmt.Errorf("%w", err)
 		}
@@ -47,31 +42,19 @@ var organizationsGetCmd = &cobra.Command{
 	Short: "Get organization details",
 	Long:  `Get details for a specific organization by org.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.GetCLIEssentials(cmd)
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{})
 		if err != nil {
 			return err
-		}
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
-		if err != nil {
-			return fmt.Errorf("%w", err)
 		}
 		orgName, _ := cmd.Flags().GetString("name")
 		if orgName == "" {
 			return fmt.Errorf("organization not specified")
 		}
-		orgs, err := client.GetAPI().ListOrganizations(context.Background())
+		org, err := featorgs.GetByName(cmd.Context(), appCtx, orgName)
 		if err != nil {
-			return fmt.Errorf("%w", err)
+			return err
 		}
-
-		// Find the organization with the matching org
-		for _, organization := range orgs {
-			if organization.Name == orgName {
-				return internal.OutputData(organization, outputFormat)
-			}
-		}
-
-		return fmt.Errorf("organization with org '%s' not found", orgName)
+		return internal.OutputData(org, outputFormat)
 	},
 }
 

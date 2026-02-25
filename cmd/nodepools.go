@@ -1,41 +1,20 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"strconv"
-	"strings"
 
 	"github.com/fatih/color"
 	"github.com/google/uuid"
-	rxtspot "github.com/rackspace-spot/spot-go-sdk/api/v1"
 	"github.com/rackspace-spot/spotctl/internal"
-	config "github.com/rackspace-spot/spotctl/pkg"
+	"github.com/rackspace-spot/spotctl/internal/app"
+	featnodepools "github.com/rackspace-spot/spotctl/internal/features/nodepools"
 	"github.com/spf13/cobra"
 )
 
 // parseCustomLabels parses a comma-separated string of key=value pairs into a map
 func parseCustomLabels(labelsStr string) (map[string]string, error) {
-	labels := make(map[string]string)
-	if labelsStr == "" {
-		return labels, nil
-	}
-
-	pairs := strings.Split(labelsStr, ",")
-	for _, pair := range pairs {
-		kv := strings.SplitN(pair, "=", 2)
-		if len(kv) != 2 {
-			return nil, fmt.Errorf("invalid label format: %s, expected key=value", pair)
-		}
-		key := strings.TrimSpace(kv[0])
-		value := strings.TrimSpace(kv[1])
-		if key == "" {
-			return nil, fmt.Errorf("label key cannot be empty in pair: %s", pair)
-		}
-		labels[key] = value
-	}
-
-	return labels, nil
+	return featnodepools.ParseKVCommaSeparated(labelsStr)
 }
 
 // parseCustomAnnotations parses a comma-separated string of key=value pairs into a map
@@ -103,7 +82,6 @@ func init() {
 	spotCreateCmd.Flags().String("custom-labels", "", "Custom Labels to be added on the spot nodepool. eg: --custom-labels key1=value1,key2=value2")
 	spotCreateCmd.Flags().String("custom-annotations", "", "Custom Annotations to be added to the spot nodepool. eg: --custom-annotations key1=value1,key2=value2")
 	spotCreateCmd.Flags().String("custom-taints", "", "Custom taints to be added to the spot nodepool. eg: --custom-taints key1=value1,key2=value2")
-	spotCreateCmd.MarkFlagRequired("name")
 	spotCreateCmd.MarkFlagRequired("cloudspace")
 	spotCreateCmd.MarkFlagRequired("serverclass")
 	spotCreateCmd.MarkFlagRequired("desired")
@@ -141,7 +119,6 @@ func init() {
 	ondemandCreateCmd.Flags().String("custom-labels", "", "Custom Labels to be added on the spot nodepool. eg: --custom-labels key1=value1,key2=value2")
 	ondemandCreateCmd.Flags().String("custom-annotations", "", "Custom Annotations to be added to the spot nodepool. eg: --custom-annotations key1=value1,key2=value2")
 	ondemandCreateCmd.Flags().String("custom-taints", "", "Custom taints to be added to the spot nodepool. eg: --custom-taints key1=value1,key2=value2")
-	ondemandCreateCmd.MarkFlagRequired("name")
 	ondemandCreateCmd.MarkFlagRequired("cloudspace")
 	ondemandCreateCmd.MarkFlagRequired("serverclass")
 	ondemandCreateCmd.MarkFlagRequired("desired")
@@ -172,26 +149,16 @@ var spotListCmd = &cobra.Command{
 		if cloudspace == "" {
 			return fmt.Errorf("cloudspace is required")
 		}
-		cfg, err := config.GetCLIEssentials(cmd)
+		org, _ := cmd.Flags().GetString("org")
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{Org: org, RequireOrg: true})
 		if err != nil {
 			return err
 		}
-		org, _ := cmd.Flags().GetString("org")
-		if org == "" {
-			if err == nil && cfg.Org != "" {
-				org = cfg.Org
-			}
-		}
-		if org == "" {
-			return fmt.Errorf("organization not specified (use --org or run 'spotcli configure')")
-		}
 
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
-		if err != nil {
-			return fmt.Errorf("%w", err)
-		}
-
-		pools, err := client.GetAPI().ListSpotNodePools(context.Background(), org, cloudspace)
+		pools, err := featnodepools.SpotList(cmd.Context(), appCtx, featnodepools.SpotListParams{
+			Org:        org,
+			Cloudspace: cloudspace,
+		})
 		if err != nil {
 			return fmt.Errorf("%w", err)
 		}
@@ -210,26 +177,12 @@ var spotGetCmd = &cobra.Command{
 		if name == "" {
 			return fmt.Errorf("name is required")
 		}
-		cfg, err := config.GetCLIEssentials(cmd)
+		org, _ := cmd.Flags().GetString("org")
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{Org: org, RequireOrg: true})
 		if err != nil {
 			return err
 		}
-		org, _ := cmd.Flags().GetString("org")
-		if org == "" {
-			if err == nil && cfg.Org != "" {
-				org = cfg.Org
-			}
-		}
-		if org == "" {
-			return fmt.Errorf("organization not specified (use --org or run 'spotcli configure')")
-		}
-
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
-		if err != nil {
-			return fmt.Errorf("%w", err)
-		}
-
-		pool, err := client.GetAPI().GetSpotNodePool(context.Background(), org, name)
+		pool, err := featnodepools.SpotGet(cmd.Context(), appCtx, featnodepools.SpotGetParams{Org: org, Name: name})
 		if err != nil {
 			return fmt.Errorf("%w", err)
 		}
@@ -249,20 +202,7 @@ var spotDeleteCmd = &cobra.Command{
 			return fmt.Errorf("name is required")
 		}
 
-		cfg, err := config.GetCLIEssentials(cmd)
-		if err != nil {
-			return err
-		}
 		org, _ := cmd.Flags().GetString("org")
-		if org == "" {
-			if err == nil && cfg.Org != "" {
-				org = cfg.Org
-			}
-		}
-		if org == "" {
-			return fmt.Errorf("organization not specified (use --org or run 'spotcli configure')")
-		}
-
 		yes, _ := cmd.Flags().GetBool("yes")
 		if !yes {
 			// Interactive prompt
@@ -276,13 +216,11 @@ var spotDeleteCmd = &cobra.Command{
 				return nil
 			}
 		}
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{Org: org, RequireOrg: true})
 		if err != nil {
-			return fmt.Errorf("%w", err)
+			return err
 		}
-
-		err = client.GetAPI().DeleteSpotNodePool(context.Background(), org, name)
-		if err != nil {
+		if err := featnodepools.SpotDelete(cmd.Context(), appCtx, featnodepools.SpotDeleteParams{Org: org, Name: name}); err != nil {
 			return fmt.Errorf("%w", err)
 		}
 		fmt.Printf("spot node pool - %s deleted successfully \n", name)
@@ -299,54 +237,46 @@ var spotCreateCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// name, _ := cmd.Flags().GetString("name")
 		name := uuid.New().String()
-		cfg, err := config.GetCLIEssentials(cmd)
-		if err != nil {
-			return err
-		}
 		org, _ := cmd.Flags().GetString("org")
-		if org == "" {
-			if err == nil && cfg.Org != "" {
-				org = cfg.Org
-			}
-		}
-		if org == "" {
-			return fmt.Errorf("organization not specified (use --org or run 'spotcli configure')")
-		}
 		cloudspace, _ := cmd.Flags().GetString("cloudspace")
 		serverClass, _ := cmd.Flags().GetString("serverclass")
 		desiredStr, _ := cmd.Flags().GetString("desired")
 		bidPrice, _ := cmd.Flags().GetString("bidprice")
-		customLabelsStr, _ := cmd.Flags().GetString("custom-labels")
-		customAnnotationsStr, _ := cmd.Flags().GetString("custom-annotations")
 
 		if name == "" || cloudspace == "" || serverClass == "" || desiredStr == "" || bidPrice == "" {
 			return fmt.Errorf("name, cloudspace, serverclass, desired, and bidprice are required")
 		}
 
-		// Parse custom labels
-		customLabels, err := parseCustomLabels(customLabelsStr)
-		if err != nil {
-			return fmt.Errorf("invalid custom-labels format: %w", err)
+		var (
+			customLabels      map[string]string
+			customAnnotations map[string]string
+		)
+		if cmd.Flags().Changed("custom-labels") {
+			customLabelsStr, _ := cmd.Flags().GetString("custom-labels")
+			labels, err := parseCustomLabels(customLabelsStr)
+			if err != nil {
+				return fmt.Errorf("invalid custom-labels format: %w", err)
+			}
+			customLabels = labels
 		}
-
-		// Parse custom annotations
-		customAnnotations, err := parseCustomAnnotations(customAnnotationsStr)
-		if err != nil {
-			return fmt.Errorf("invalid custom-annotations format: %w", err)
+		if cmd.Flags().Changed("custom-annotations") {
+			customAnnotationsStr, _ := cmd.Flags().GetString("custom-annotations")
+			ann, err := parseCustomAnnotations(customAnnotationsStr)
+			if err != nil {
+				return fmt.Errorf("invalid custom-annotations format: %w", err)
+			}
+			customAnnotations = ann
 		}
 
 		desired, err := strconv.Atoi(desiredStr)
 		if err != nil {
 			return fmt.Errorf("desired must be a valid integer: %w", err)
 		}
-
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{Org: org, RequireOrg: true})
 		if err != nil {
-			return fmt.Errorf("%w", err)
+			return err
 		}
-
-		pool := &rxtspot.SpotNodePool{
-			Name:              name,
+		pool, err := featnodepools.SpotCreate(cmd.Context(), appCtx, featnodepools.SpotCreateParams{
 			Org:               org,
 			Cloudspace:        cloudspace,
 			ServerClass:       serverClass,
@@ -354,19 +284,12 @@ var spotCreateCmd = &cobra.Command{
 			BidPrice:          bidPrice,
 			CustomLabels:      customLabels,
 			CustomAnnotations: customAnnotations,
-		}
-
-		err = client.GetAPI().CreateSpotNodePool(context.Background(), org, *pool)
+			Name:              name,
+		})
 		if err != nil {
 			return fmt.Errorf("%w", err)
 		}
-		pool, err = client.GetAPI().GetSpotNodePool(context.Background(), org, name)
-		if err != nil {
-			return fmt.Errorf("%w", err)
-		}
-
-		fmt.Printf("spot nodepool - %s created successfully \n", pool.Name)
-
+		fmt.Printf("spot nodepool - %s created successfully \n", name)
 		return internal.OutputData(pool, outputFormat)
 	},
 }
@@ -378,71 +301,77 @@ var spotUpdateCmd = &cobra.Command{
 	Long:  `Update a spot node pool in a cloudspace.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name, _ := cmd.Flags().GetString("name")
-		cfg, err := config.GetCLIEssentials(cmd)
-		if err != nil {
-			return err
-		}
 		org, _ := cmd.Flags().GetString("org")
-		if org == "" {
-			if err == nil && cfg.Org != "" {
-				org = cfg.Org
-			}
-		}
-		if org == "" {
-			return fmt.Errorf("organization not specified (use --org or run 'spotcli configure')")
-		}
 		cloudspace, _ := cmd.Flags().GetString("cloudspace")
-		desiredStr, _ := cmd.Flags().GetString("desired")
-		bidPrice, _ := cmd.Flags().GetString("bidprice")
-		customLabelsStr, _ := cmd.Flags().GetString("custom-labels")
-		customAnnotationsStr, _ := cmd.Flags().GetString("custom-annotations")
 
 		if name == "" || cloudspace == "" {
 			return fmt.Errorf("name, cloudspace are required")
 		}
 
-		// Parse custom labels
-		customLabels, err := parseCustomLabels(customLabelsStr)
-		if err != nil {
-			return fmt.Errorf("invalid custom-labels format: %w", err)
+		var (
+			desiredPtr         *int
+			bidPricePtr        *string
+			customLabels       map[string]string
+			customAnnotations  map[string]string
+			err                error
+		)
+
+		if cmd.Flags().Changed("desired") {
+			desiredStr, _ := cmd.Flags().GetString("desired")
+			if desiredStr == "" {
+				return fmt.Errorf("desired must be a valid integer")
+			}
+			desired, derr := strconv.Atoi(desiredStr)
+			if derr != nil {
+				return fmt.Errorf("desired must be a valid integer: %w", derr)
+			}
+			desiredPtr = &desired
 		}
 
-		// Parse custom annotations
-		customAnnotations, err := parseCustomAnnotations(customAnnotationsStr)
-		if err != nil {
-			return fmt.Errorf("invalid custom-annotations format: %w", err)
+		if cmd.Flags().Changed("bidprice") {
+			bidPrice, _ := cmd.Flags().GetString("bidprice")
+			if bidPrice == "" {
+				return fmt.Errorf("bidprice must be non-empty when provided")
+			}
+			bidPricePtr = &bidPrice
 		}
-		var desired int
-		if desiredStr != "" {
-			desired, err = strconv.Atoi(desiredStr)
+
+		if cmd.Flags().Changed("custom-labels") {
+			customLabelsStr, _ := cmd.Flags().GetString("custom-labels")
+			customLabels, err = parseCustomLabels(customLabelsStr)
 			if err != nil {
-				return fmt.Errorf("desired must be a valid integer: %w", err)
+				return fmt.Errorf("invalid custom-labels format: %w", err)
 			}
 		}
 
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
-		if err != nil {
-			return fmt.Errorf("%w", err)
+		if cmd.Flags().Changed("custom-annotations") {
+			customAnnotationsStr, _ := cmd.Flags().GetString("custom-annotations")
+			customAnnotations, err = parseCustomAnnotations(customAnnotationsStr)
+			if err != nil {
+				return fmt.Errorf("invalid custom-annotations format: %w", err)
+			}
 		}
 
-		pool := &rxtspot.SpotNodePool{
-			Name:              name,
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{Org: org, RequireOrg: true})
+		if err != nil {
+			return err
+		}
+
+		updated, err := featnodepools.SpotUpdate(cmd.Context(), appCtx, featnodepools.SpotUpdateParams{
 			Org:               org,
+			Name:              name,
 			Cloudspace:        cloudspace,
-			Desired:           desired,
-			BidPrice:          bidPrice,
+			Desired:           desiredPtr,
+			BidPrice:          bidPricePtr,
 			CustomLabels:      customLabels,
 			CustomAnnotations: customAnnotations,
-		}
-
-		err = client.GetAPI().UpdateSpotNodePool(context.Background(), org, *pool)
+		})
 		if err != nil {
 			return fmt.Errorf("%w", err)
 		}
 
-		fmt.Printf("spot nodepool - %s updated successfully \n", pool.Name)
-
-		return internal.OutputData(pool, outputFormat)
+		fmt.Printf("spot nodepool - %s updated successfully \n", name)
+		return internal.OutputData(updated, outputFormat)
 	},
 }
 
@@ -452,31 +381,18 @@ var ondemandListCmd = &cobra.Command{
 	Short: "List on-demand node pools",
 	Long:  `List all on-demand node pools in a org.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.GetCLIEssentials(cmd)
+		org, _ := cmd.Flags().GetString("org")
+		cloudspace, _ := cmd.Flags().GetString("cloudspace")
+
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{Org: org, RequireOrg: true})
 		if err != nil {
 			return err
 		}
-		org, _ := cmd.Flags().GetString("org")
-		if org == "" {
-			if err == nil && cfg.Org != "" {
-				org = cfg.Org
-			}
-		}
-		if org == "" {
-			return fmt.Errorf("organization not specified (use --org or run 'spotcli configure')")
-		}
-		cloudspace, _ := cmd.Flags().GetString("cloudspace")
 
-		if org == "" || cloudspace == "" {
-			return fmt.Errorf("org and cloudspace are required")
-		}
-
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
-		if err != nil {
-			return fmt.Errorf("%w", err)
-		}
-
-		pools, err := client.GetAPI().ListOnDemandNodePools(context.Background(), org, cloudspace)
+		pools, err := featnodepools.OnDemandList(cmd.Context(), appCtx, featnodepools.OnDemandListParams{
+			Org:        org,
+			Cloudspace: cloudspace,
+		})
 		if err != nil {
 			return fmt.Errorf("%w", err)
 		}
@@ -493,19 +409,7 @@ var ondemandCreateCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// name, _ := cmd.Flags().GetString("name")
 		name := uuid.New().String()
-		cfg, err := config.GetCLIEssentials(cmd)
-		if err != nil {
-			return err
-		}
 		org, _ := cmd.Flags().GetString("org")
-		if org == "" {
-			if err == nil && cfg.Org != "" {
-				org = cfg.Org
-			}
-		}
-		if org == "" {
-			return fmt.Errorf("organization not specified (use --org or run 'spotcli configure')")
-		}
 		cloudspace, _ := cmd.Flags().GetString("cloudspace")
 		serverClass, _ := cmd.Flags().GetString("serverclass")
 		desiredStr, _ := cmd.Flags().GetString("desired")
@@ -519,47 +423,46 @@ var ondemandCreateCmd = &cobra.Command{
 			return fmt.Errorf("desired must be a valid integer: %w", err)
 		}
 
-		customLabelsStr, _ := cmd.Flags().GetString("custom-labels")
-		customAnnotationsStr, _ := cmd.Flags().GetString("custom-annotations")
-
-		// Parse custom labels
-		customLabels, err := parseCustomLabels(customLabelsStr)
-		if err != nil {
-			return fmt.Errorf("invalid custom-labels format: %w", err)
+		var (
+			customLabels      map[string]string
+			customAnnotations map[string]string
+		)
+		if cmd.Flags().Changed("custom-labels") {
+			customLabelsStr, _ := cmd.Flags().GetString("custom-labels")
+			labels, err := parseCustomLabels(customLabelsStr)
+			if err != nil {
+				return fmt.Errorf("invalid custom-labels format: %w", err)
+			}
+			customLabels = labels
+		}
+		if cmd.Flags().Changed("custom-annotations") {
+			customAnnotationsStr, _ := cmd.Flags().GetString("custom-annotations")
+			ann, err := parseCustomAnnotations(customAnnotationsStr)
+			if err != nil {
+				return fmt.Errorf("invalid custom-annotations format: %w", err)
+			}
+			customAnnotations = ann
 		}
 
-		// Parse custom annotations
-		customAnnotations, err := parseCustomAnnotations(customAnnotationsStr)
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{Org: org, RequireOrg: true})
 		if err != nil {
-			return fmt.Errorf("invalid custom-annotations format: %w", err)
-		}
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
-		if err != nil {
-			return fmt.Errorf("%w", err)
+			return err
 		}
 
-		pool := &rxtspot.OnDemandNodePool{
-			Name:              name,
+		pool, err := featnodepools.OnDemandCreate(cmd.Context(), appCtx, featnodepools.OnDemandCreateParams{
 			Org:               org,
 			Cloudspace:        cloudspace,
 			ServerClass:       serverClass,
 			Desired:           desired,
 			CustomLabels:      customLabels,
 			CustomAnnotations: customAnnotations,
-		}
-
-		err = client.GetAPI().CreateOnDemandNodePool(context.Background(), org, *pool)
+			Name:              name,
+		})
 		if err != nil {
 			return fmt.Errorf("%w", err)
 		}
 
-		pool, err = client.GetAPI().GetOnDemandNodePool(context.Background(), org, name)
-		if err != nil {
-			return fmt.Errorf("%w", err)
-		}
-
-		fmt.Printf("on-demand nodepool - %s created successfully \n", pool.Name)
-
+		fmt.Printf("on-demand nodepool - %s created successfully \n", name)
 		return internal.OutputData(pool, outputFormat)
 	},
 }
@@ -573,26 +476,12 @@ var ondemandGetCmd = &cobra.Command{
 		if name == "" {
 			return fmt.Errorf("name is required")
 		}
-		cfg, err := config.GetCLIEssentials(cmd)
+		org, _ := cmd.Flags().GetString("org")
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{Org: org, RequireOrg: true})
 		if err != nil {
 			return err
 		}
-		org, _ := cmd.Flags().GetString("org")
-		if org == "" {
-			if err == nil && cfg.Org != "" {
-				org = cfg.Org
-			}
-		}
-		if org == "" {
-			return fmt.Errorf("organization not specified (use --org or run 'spotcli configure')")
-		}
-
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
-		if err != nil {
-			return fmt.Errorf("%w", err)
-		}
-
-		pool, err := client.GetAPI().GetOnDemandNodePool(context.Background(), org, name)
+		pool, err := featnodepools.OnDemandGet(cmd.Context(), appCtx, featnodepools.OnDemandGetParams{Org: org, Name: name})
 		if err != nil {
 			return fmt.Errorf("%w", err)
 		}
@@ -608,70 +497,66 @@ var ondemandUpdateCmd = &cobra.Command{
 	Long:  `Update a on-demand node pool in a cloudspace.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name, _ := cmd.Flags().GetString("name")
-		cfg, err := config.GetCLIEssentials(cmd)
-		if err != nil {
-			return err
-		}
 		org, _ := cmd.Flags().GetString("org")
-		if org == "" {
-			if err == nil && cfg.Org != "" {
-				org = cfg.Org
-			}
-		}
-		if org == "" {
-			return fmt.Errorf("organization not specified (use --org or run 'spotcli configure')")
-		}
 		cloudspace, _ := cmd.Flags().GetString("cloudspace")
-		desiredStr, _ := cmd.Flags().GetString("desired")
 
 		if name == "" || cloudspace == "" {
 			return fmt.Errorf("name and cloudspace are required")
 		}
 
-		var desired int
-		if desiredStr != "" {
-			desired, err = strconv.Atoi(desiredStr)
+		var (
+			desiredPtr        *int
+			customLabels      map[string]string
+			customAnnotations map[string]string
+			err               error
+		)
+
+		if cmd.Flags().Changed("desired") {
+			desiredStr, _ := cmd.Flags().GetString("desired")
+			if desiredStr == "" {
+				return fmt.Errorf("desired must be a valid integer")
+			}
+			desired, derr := strconv.Atoi(desiredStr)
+			if derr != nil {
+				return fmt.Errorf("desired must be a valid integer: %w", derr)
+			}
+			desiredPtr = &desired
+		}
+
+		if cmd.Flags().Changed("custom-labels") {
+			customLabelsStr, _ := cmd.Flags().GetString("custom-labels")
+			customLabels, err = parseCustomLabels(customLabelsStr)
 			if err != nil {
-				return fmt.Errorf("desired must be a valid integer: %w", err)
+				return fmt.Errorf("invalid custom-labels format: %w", err)
 			}
 		}
-		customLabelsStr, _ := cmd.Flags().GetString("custom-labels")
-		customAnnotationsStr, _ := cmd.Flags().GetString("custom-annotations")
-
-		// Parse custom labels
-		customLabels, err := parseCustomLabels(customLabelsStr)
-		if err != nil {
-			return fmt.Errorf("invalid custom-labels format: %w", err)
+		if cmd.Flags().Changed("custom-annotations") {
+			customAnnotationsStr, _ := cmd.Flags().GetString("custom-annotations")
+			customAnnotations, err = parseCustomAnnotations(customAnnotationsStr)
+			if err != nil {
+				return fmt.Errorf("invalid custom-annotations format: %w", err)
+			}
 		}
 
-		// Parse custom annotations
-		customAnnotations, err := parseCustomAnnotations(customAnnotationsStr)
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{Org: org, RequireOrg: true})
 		if err != nil {
-			return fmt.Errorf("invalid custom-annotations format: %w", err)
+			return err
 		}
 
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
-		if err != nil {
-			return fmt.Errorf("%w", err)
-		}
-
-		pool := &rxtspot.OnDemandNodePool{
-			Name:              name,
+		updated, err := featnodepools.OnDemandUpdate(cmd.Context(), appCtx, featnodepools.OnDemandUpdateParams{
 			Org:               org,
+			Name:              name,
 			Cloudspace:        cloudspace,
-			Desired:           desired,
+			Desired:           desiredPtr,
 			CustomLabels:      customLabels,
 			CustomAnnotations: customAnnotations,
-		}
-
-		err = client.GetAPI().UpdateOnDemandNodePool(context.Background(), org, *pool)
+		})
 		if err != nil {
 			return fmt.Errorf("%w", err)
 		}
 
-		fmt.Printf("on-demand nodepool - %s updated successfully \n", pool.Name)
-
-		return internal.OutputData(pool, outputFormat)
+		fmt.Printf("on-demand nodepool - %s updated successfully \n", name)
+		return internal.OutputData(updated, outputFormat)
 	},
 }
 
@@ -686,19 +571,7 @@ var ondemandDeleteCmd = &cobra.Command{
 			return fmt.Errorf("name is required")
 		}
 
-		cfg, err := config.GetCLIEssentials(cmd)
-		if err != nil {
-			return err
-		}
 		org, _ := cmd.Flags().GetString("org")
-		if org == "" {
-			if err == nil && cfg.Org != "" {
-				org = cfg.Org
-			}
-		}
-		if org == "" {
-			return fmt.Errorf("organization not specified (use --org or run 'spotcli configure')")
-		}
 		yes, _ := cmd.Flags().GetBool("yes")
 		if !yes {
 			// Interactive prompt
@@ -712,13 +585,11 @@ var ondemandDeleteCmd = &cobra.Command{
 				return nil
 			}
 		}
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{Org: org, RequireOrg: true})
 		if err != nil {
-			return fmt.Errorf("%w", err)
+			return err
 		}
-
-		err = client.GetAPI().DeleteOnDemandNodePool(context.Background(), org, name)
-		if err != nil {
+		if err := featnodepools.OnDemandDelete(cmd.Context(), appCtx, featnodepools.OnDemandDeleteParams{Org: org, Name: name}); err != nil {
 			return fmt.Errorf("%w", err)
 		}
 		fmt.Printf("ondemand node pool - %s deleted successfully \n", name)
