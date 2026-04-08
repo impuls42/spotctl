@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	rxtspot "github.com/rackspace-spot/spot-go-sdk/api/v1"
 	"github.com/rackspace-spot/spotctl/internal/app"
+	"github.com/rackspace-spot/spotctl/internal/validation"
 )
 
 func ParseKVCommaSeparated(s string) (map[string]string, error) {
@@ -55,13 +56,16 @@ type SpotCreateParams struct {
 }
 
 type SpotUpdateParams struct {
-	Org               string            `json:"org,omitempty" jsonschema:"Organization ID; falls back to configured org if empty"`
-	Name              string            `json:"name" jsonschema:"Spot node pool name (UUID)"`
-	Cloudspace        string            `json:"cloudspace" jsonschema:"Cloudspace name"`
-	Desired           *int              `json:"desired,omitempty" jsonschema:"Desired number of nodes; if omitted, unchanged"`
-	BidPrice          *string           `json:"bidprice,omitempty" jsonschema:"Maximum bid price; if omitted, unchanged"`
-	CustomLabels      map[string]string `json:"customLabels,omitempty" jsonschema:"Custom labels for the node pool; if omitted, unchanged"`
-	CustomAnnotations map[string]string `json:"customAnnotations,omitempty" jsonschema:"Custom annotations for the node pool; if omitted, unchanged"`
+	Org                   string            `json:"org,omitempty" jsonschema:"Organization ID; falls back to configured org if empty"`
+	Name                  string            `json:"name" jsonschema:"Spot node pool name (UUID)"`
+	Cloudspace            string            `json:"cloudspace" jsonschema:"Cloudspace name"`
+	Desired               *int              `json:"desired,omitempty" jsonschema:"Desired number of nodes; if omitted, unchanged"`
+	BidPrice              *string           `json:"bidprice,omitempty" jsonschema:"Maximum bid price; if omitted, unchanged"`
+	AutoscalingEnabled    *bool             `json:"autoscaling_enabled,omitempty" jsonschema:"Enable or disable autoscaling; if omitted, unchanged"`
+	AutoscalingMinNodes   *int              `json:"autoscaling_min_nodes,omitempty" jsonschema:"Minimum number of nodes for autoscaling; if omitted, unchanged"`
+	AutoscalingMaxNodes   *int              `json:"autoscaling_max_nodes,omitempty" jsonschema:"Maximum number of nodes for autoscaling; if omitted, unchanged"`
+	CustomLabels          map[string]string `json:"customLabels,omitempty" jsonschema:"Custom labels for the node pool; if omitted, unchanged"`
+	CustomAnnotations     map[string]string `json:"customAnnotations,omitempty" jsonschema:"Custom annotations for the node pool; if omitted, unchanged"`
 }
 
 type SpotDeleteParams struct {
@@ -109,6 +113,17 @@ func SpotCreate(ctx context.Context, appCtx *app.Context, params SpotCreateParam
 		return nil, fmt.Errorf("cloudspace, serverclass, desired (>0), and bidprice are required")
 	}
 
+	// Validate bid price (B-01: strip $ and validate format)
+	cleanBidPrice, err := validation.ValidateBidPrice(params.BidPrice)
+	if err != nil {
+		return nil, fmt.Errorf("invalid bid price: %w", err)
+	}
+
+	// Validate server class is available for spot bidding (B-02: check for deprecated BM classes)
+	if err := validation.ValidateServerClassForSpotBidding(ctx, appCtx, params.ServerClass); err != nil {
+		return nil, err
+	}
+
 	name := params.Name
 	if name == "" {
 		name = uuid.NewString()
@@ -120,7 +135,7 @@ func SpotCreate(ctx context.Context, appCtx *app.Context, params SpotCreateParam
 		Cloudspace:        params.Cloudspace,
 		ServerClass:       params.ServerClass,
 		Desired:           params.Desired,
-		BidPrice:          params.BidPrice,
+		BidPrice:          cleanBidPrice,
 		CustomLabels:      params.CustomLabels,
 		CustomAnnotations: params.CustomAnnotations,
 	}
@@ -148,6 +163,23 @@ func SpotUpdate(ctx context.Context, appCtx *app.Context, params SpotUpdateParam
 		return nil, err
 	}
 
+	// Validate bid price if being updated (B-01: strip $ and validate format)
+	var cleanBidPrice string
+	if params.BidPrice != nil {
+		var err error
+		cleanBidPrice, err = validation.ValidateBidPrice(*params.BidPrice)
+		if err != nil {
+			return nil, fmt.Errorf("invalid bid price: %w", err)
+		}
+	} else {
+		// Strip $ from current value if not updating (B-01)
+		var err error
+		cleanBidPrice, err = validation.ValidateBidPrice(current.BidPrice)
+		if err != nil {
+			return nil, fmt.Errorf("invalid current bid price: %w", err)
+		}
+	}
+
 	// Preserve current fields unless explicitly overridden.
 	updated := rxtspot.SpotNodePool{
 		Name:       current.Name,
@@ -156,7 +188,7 @@ func SpotUpdate(ctx context.Context, appCtx *app.Context, params SpotUpdateParam
 		// Keep serverclass from current; CLI doesn't allow changing it.
 		ServerClass:       current.ServerClass,
 		Desired:           current.Desired,
-		BidPrice:          current.BidPrice,
+		BidPrice:          cleanBidPrice,
 		CustomLabels:      current.CustomLabels,
 		CustomAnnotations: current.CustomAnnotations,
 	}
@@ -164,15 +196,31 @@ func SpotUpdate(ctx context.Context, appCtx *app.Context, params SpotUpdateParam
 	if params.Desired != nil {
 		updated.Desired = *params.Desired
 	}
-	if params.BidPrice != nil {
-		updated.BidPrice = *params.BidPrice
-	}
 	if params.CustomLabels != nil {
 		updated.CustomLabels = params.CustomLabels
 	}
 	if params.CustomAnnotations != nil {
 		updated.CustomAnnotations = params.CustomAnnotations
 	}
+
+		// Validate autoscaling parameters
+		if params.AutoscalingMinNodes != nil && params.AutoscalingMaxNodes != nil {
+			if *params.AutoscalingMinNodes < 0 || *params.AutoscalingMaxNodes < 0 {
+				return nil, fmt.Errorf("autoscaling min and max nodes must be non-negative")
+			}
+			if *params.AutoscalingMinNodes > *params.AutoscalingMaxNodes {
+				return nil, fmt.Errorf("autoscaling min nodes (%d) cannot be greater than max nodes (%d)", *params.AutoscalingMinNodes, *params.AutoscalingMaxNodes)
+			}
+		}
+		if params.AutoscalingEnabled != nil {
+			updated.Autoscaling.Enabled = *params.AutoscalingEnabled
+		}
+		if params.AutoscalingMinNodes != nil {
+			updated.Autoscaling.MinNodes = int64(*params.AutoscalingMinNodes)
+		}
+		if params.AutoscalingMaxNodes != nil {
+			updated.Autoscaling.MaxNodes = int64(*params.AutoscalingMaxNodes)
+		}
 
 	if err := appCtx.Client.GetAPI().UpdateSpotNodePool(ctx, org, updated); err != nil {
 		return nil, err
@@ -217,12 +265,15 @@ type OnDemandCreateParams struct {
 }
 
 type OnDemandUpdateParams struct {
-	Org               string            `json:"org,omitempty" jsonschema:"Organization ID; falls back to configured org if empty"`
-	Name              string            `json:"name" jsonschema:"On-demand node pool name (UUID)"`
-	Cloudspace        string            `json:"cloudspace" jsonschema:"Cloudspace name"`
-	Desired           *int              `json:"desired,omitempty" jsonschema:"Desired number of nodes; if omitted, unchanged"`
-	CustomLabels      map[string]string `json:"customLabels,omitempty" jsonschema:"Custom labels for the node pool; if omitted, unchanged"`
-	CustomAnnotations map[string]string `json:"customAnnotations,omitempty" jsonschema:"Custom annotations for the node pool; if omitted, unchanged"`
+	Org                   string            `json:"org,omitempty" jsonschema:"Organization ID; falls back to configured org if empty"`
+	Name                  string            `json:"name" jsonschema:"On-demand node pool name (UUID)"`
+	Cloudspace            string            `json:"cloudspace" jsonschema:"Cloudspace name"`
+	Desired               *int              `json:"desired,omitempty" jsonschema:"Desired number of nodes; if omitted, unchanged"`
+	AutoscalingEnabled    *bool             `json:"autoscaling_enabled,omitempty" jsonschema:"Enable or disable autoscaling; if omitted, unchanged"`
+	AutoscalingMinNodes   *int              `json:"autoscaling_min_nodes,omitempty" jsonschema:"Minimum number of nodes for autoscaling; if omitted, unchanged"`
+	AutoscalingMaxNodes   *int              `json:"autoscaling_max_nodes,omitempty" jsonschema:"Maximum number of nodes for autoscaling; if omitted, unchanged"`
+	CustomLabels          map[string]string `json:"customLabels,omitempty" jsonschema:"Custom labels for the node pool; if omitted, unchanged"`
+	CustomAnnotations     map[string]string `json:"customAnnotations,omitempty" jsonschema:"Custom annotations for the node pool; if omitted, unchanged"`
 }
 
 type OnDemandDeleteParams struct {
@@ -328,6 +379,25 @@ func OnDemandUpdate(ctx context.Context, appCtx *app.Context, params OnDemandUpd
 	if params.CustomAnnotations != nil {
 		updated.CustomAnnotations = params.CustomAnnotations
 	}
+
+		// Validate autoscaling parameters
+		if params.AutoscalingMinNodes != nil && params.AutoscalingMaxNodes != nil {
+			if *params.AutoscalingMinNodes < 0 || *params.AutoscalingMaxNodes < 0 {
+				return nil, fmt.Errorf("autoscaling min and max nodes must be non-negative")
+			}
+			if *params.AutoscalingMinNodes > *params.AutoscalingMaxNodes {
+				return nil, fmt.Errorf("autoscaling min nodes (%d) cannot be greater than max nodes (%d)", *params.AutoscalingMinNodes, *params.AutoscalingMaxNodes)
+			}
+		}
+		if params.AutoscalingEnabled != nil {
+			updated.Autoscaling.Enabled = *params.AutoscalingEnabled
+		}
+		if params.AutoscalingMinNodes != nil {
+			updated.Autoscaling.MinNodes = *params.AutoscalingMinNodes
+		}
+		if params.AutoscalingMaxNodes != nil {
+			updated.Autoscaling.MaxNodes = *params.AutoscalingMaxNodes
+		}
 
 	if err := appCtx.Client.GetAPI().UpdateOnDemandNodePool(ctx, org, updated); err != nil {
 		return nil, err

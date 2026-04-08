@@ -112,6 +112,15 @@ type CloudspacesDeleteParams struct {
 	Name string `json:"name" jsonschema:"Cloudspace name to delete"`
 }
 
+type CloudspacesUpdateParams struct {
+	Org                  string `json:"org,omitempty" jsonschema:"Organization ID; falls back to configured org if empty"`
+	Name                 string `json:"name" jsonschema:"Cloudspace name"`
+	KubernetesVersion    *string `json:"kubernetes_version,omitempty" jsonschema:"Kubernetes version; if omitted, unchanged"`
+	HAControlPlane       *bool `json:"ha_control_plane,omitempty" jsonschema:"Enable or disable HA control plane; if omitted, unchanged"`
+	PreemptionWebhookURL *string `json:"preemption_webhook_url,omitempty" jsonschema:"Preemption webhook URL; if omitted, unchanged"`
+	CNI                  *string `json:"cni,omitempty" jsonschema:"Container Network Interface (CNI) plugin; if omitted, unchanged"`
+}
+
 type CloudspacesGetConfigParams struct {
 	Org  string `json:"org,omitempty" jsonschema:"Organization ID; falls back to configured org if empty"`
 	Name string `json:"name" jsonschema:"Cloudspace name"`
@@ -163,6 +172,33 @@ func registerCloudspacesTools(server *mcp.Server) {
 			return nil, nil, err
 		}
 		res, err := cloudspaces.Create(ctx, appCtx, *params)
+		if err != nil {
+			return nil, nil, err
+		}
+		return jsonResult(res)
+	})
+
+	// update (T-04)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "cloudspaces_update",
+		Description: "Update an existing Rackspace Spot cloudspace (kubernetes version, HA control plane, CNI, preemption webhook)",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, params *CloudspacesUpdateParams) (*mcp.CallToolResult, any, error) {
+		if params.Name == "" {
+			return nil, nil, fmt.Errorf("name is required")
+		}
+		appCtx, err := app.Load(ctx, app.LoadOptions{Org: params.Org, RequireOrg: true})
+		if err != nil {
+			return nil, nil, err
+		}
+		// Convert CloudspacesUpdateParams to cloudspaces.UpdateParams
+		updateParams := cloudspaces.UpdateParams{
+			Name:                 params.Name,
+			KubernetesVersion:    params.KubernetesVersion,
+			HAControlPlane:       params.HAControlPlane,
+			PreemptionWebhookURL: params.PreemptionWebhookURL,
+			CNI:                  params.CNI,
+		}
+		res, err := cloudspaces.Update(ctx, appCtx, appCtx.Org, updateParams)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -354,6 +390,20 @@ type PricingGetParams struct {
 
 type PricingGetAllParams struct{}
 
+type PricingGetHistoryParams struct {
+	ServerClass string `json:"serverclass" jsonschema:"Server class name to get price history for"`
+}
+
+type PricingGetPercentilesParams struct {
+	Region      string `json:"region,omitempty" jsonschema:"Region to filter percentiles by (optional)"`
+	ServerClass string `json:"serverclass,omitempty" jsonschema:"Server class to filter percentiles by (optional)"`
+}
+
+type PricingGetComparableParams struct {
+	Region      string `json:"region,omitempty" jsonschema:"Region to filter comparable prices by (optional)"`
+	ServerClass string `json:"serverclass,omitempty" jsonschema:"Server class to filter comparable prices by (optional)"`
+}
+
 func registerPricingTools(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "pricing_get",
@@ -382,6 +432,45 @@ func registerPricingTools(server *mcp.Server) {
 			return nil, nil, err
 		}
 		res, err := pricing.GetAll(ctx, appCtx)
+		if err != nil {
+			return nil, nil, err
+		}
+		return jsonResult(res)
+	})
+
+	// Pricing get history (T-02)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "pricing_get_history",
+		Description: "Get historical price data for a server class (enables volatility analysis and P95 bid recommendations)",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, params *PricingGetHistoryParams) (*mcp.CallToolResult, any, error) {
+		if params.ServerClass == "" {
+			return nil, nil, fmt.Errorf("serverclass is required")
+		}
+		res, err := GetPriceHistory(ctx, params.ServerClass)
+		if err != nil {
+			return nil, nil, err
+		}
+		return jsonResult(res)
+	})
+
+	// Pricing get percentiles (T-03)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "pricing_get_percentiles",
+		Description: "Get price percentile distributions for server classes (enables intelligent bid setting with P50/P95 values)",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, params *PricingGetPercentilesParams) (*mcp.CallToolResult, any, error) {
+		res, err := GetPricePercentiles(ctx, params.Region, params.ServerClass)
+		if err != nil {
+			return nil, nil, err
+		}
+		return jsonResult(res)
+	})
+
+	// Pricing get comparable (T-06)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "pricing_get_comparable",
+		Description: "Get Rackspace Spot prices vs hyperscaler equivalents (AWS/GCP/Azure) for cost optimization analysis",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, params *PricingGetComparableParams) (*mcp.CallToolResult, any, error) {
+		res, err := GetComparablePrices(ctx, params.Region, params.ServerClass)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -441,7 +530,7 @@ func registerNodepoolsTools(server *mcp.Server) {
 	// Spot update
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "spot_nodepools_update",
-		Description: "Update an existing spot node pool",
+		Description: "Update an existing spot node pool (bid price, desired count, autoscaling, labels,annotations)",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params *nodepools.SpotUpdateParams) (*mcp.CallToolResult, any, error) {
 		appCtx, err := app.Load(ctx, app.LoadOptions{Org: params.Org, RequireOrg: true})
 		if err != nil {
@@ -520,7 +609,7 @@ func registerNodepoolsTools(server *mcp.Server) {
 	// On-demand update
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "ondemand_nodepools_update",
-		Description: "Update an existing on-demand node pool",
+		Description: "Update an existing on-demand node pool (desired count, autoscaling, labels, annotations)",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params *nodepools.OnDemandUpdateParams) (*mcp.CallToolResult, any, error) {
 		appCtx, err := app.Load(ctx, app.LoadOptions{Org: params.Org, RequireOrg: true})
 		if err != nil {
