@@ -12,11 +12,12 @@ require (
 	github.com/spf13/pflag v1.0.6
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/klog v1.0.0
+	k8s.io/klog/v2 v2.130.1
 )
 
 require (
 	github.com/modelcontextprotocol/go-sdk v1.3.1
-	github.com/rackspace-spot/spot-go-sdk v0.1.0
+	github.com/rackspace-spot/spot-go-sdk v0.2.0
 )
 
 replace github.com/rackspace-spot/spot-go-sdk => ../spot-go-sdk
@@ -30,6 +31,7 @@ require (
 	github.com/charmbracelet/x/cellbuf v0.0.13-0.20250311204145-2c3ea96c31dd // indirect
 	github.com/charmbracelet/x/term v0.2.1 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
+	github.com/go-logr/logr v1.4.1 // indirect
 	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/kelseyhightower/envconfig v1.4.0 // indirect

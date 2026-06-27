@@ -74,7 +74,7 @@ func init() {
 
 	// Flags for spot create
 	// spotCreateCmd.Flags().String("name", "", "Node pool name (Note: It should be a valid lower case UUID) (required)")
-	spotCreateCmd.Flags().String("org", "", "Organization ID")
+	spotCreateCmd.Flags().String("org", "", "Organization name")
 	spotCreateCmd.Flags().String("cloudspace", "", "Cloudspace name (required)")
 	spotCreateCmd.Flags().String("serverclass", "", "Server class (required)")
 	spotCreateCmd.Flags().String("desired", "", "Desired number of nodes (required)")
@@ -94,7 +94,7 @@ func init() {
 	spotUpdateCmd.Flags().String("cloudspace", "", "Cloudspace name (required)")
 	spotUpdateCmd.Flags().String("desired", "", "Desired number of nodes (optional)")
 	spotUpdateCmd.Flags().String("bidprice", "", "Maximum bid price (optional)")
-	spotUpdateCmd.Flags().String("org", "", "Organization ID")
+	spotUpdateCmd.Flags().String("org", "", "Organization name")
 	spotUpdateCmd.Flags().String("custom-labels", "", "Custom Labels to be added on the spot nodepool. eg: --custom-labels key1=value1,key2=value2")
 	spotUpdateCmd.Flags().String("custom-annotations", "", "Custom Annotations to be added to the spot nodepool. eg: --custom-annotations key1=value1,key2=value2")
 	spotUpdateCmd.Flags().String("custom-taints", "", "Custom taints to be added to the spot nodepool. eg: --custom-taints key1=value1,key2=value2")
@@ -106,7 +106,7 @@ func init() {
 	spotDeleteCmd.Flags().BoolP("yes", "y", false, "Automatic yes to prompts; assume \"yes\" as answer")
 
 	// Flags for ondemand list
-	ondemandListCmd.Flags().String("org", "", "Organization ID")
+	ondemandListCmd.Flags().String("org", "", "Organization name")
 	ondemandListCmd.Flags().String("cloudspace", "", "Cloudspace name (required)")
 	ondemandListCmd.MarkFlagRequired("cloudspace")
 
@@ -115,7 +115,7 @@ func init() {
 
 	// Flags for ondemand create
 	// ondemandCreateCmd.Flags().String("name", "", "Node pool name (Note: It should be a valid lower case UUID) (required)")
-	ondemandCreateCmd.Flags().String("org", "", "Organization ID")
+	ondemandCreateCmd.Flags().String("org", "", "Organization name")
 	ondemandCreateCmd.Flags().String("cloudspace", "", "Cloudspace name (required)")
 	ondemandCreateCmd.Flags().String("serverclass", "", "Server class (required)")
 	ondemandCreateCmd.Flags().String("desired", "", "Desired number of nodes (required)")
@@ -129,7 +129,7 @@ func init() {
 	ondemandUpdateCmd.Flags().String("name", "", "Node pool name (Note: It should be a valid lower case UUID) (required)")
 	ondemandUpdateCmd.Flags().String("cloudspace", "", "Cloudspace name (required)")
 	ondemandUpdateCmd.Flags().String("desired", "", "Desired number of nodes (optional)")
-	ondemandUpdateCmd.Flags().String("org", "", "Organization ID")
+	ondemandUpdateCmd.Flags().String("org", "", "Organization name")
 	ondemandUpdateCmd.Flags().String("custom-labels", "", "Custom Labels to be added on the spot nodepool. eg: --custom-labels key1=value1,key2=value2")
 	ondemandUpdateCmd.Flags().String("custom-annotations", "", "Custom Annotations to be added to the spot nodepool. eg: --custom-annotations key1=value1,key2=value2")
 	ondemandUpdateCmd.Flags().String("custom-taints", "", "Custom taints to be added to the spot nodepool. eg: --custom-taints key1=value1,key2=value2")
