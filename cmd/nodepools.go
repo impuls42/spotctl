@@ -79,6 +79,9 @@ func init() {
 	spotCreateCmd.Flags().String("serverclass", "", "Server class (required)")
 	spotCreateCmd.Flags().String("desired", "", "Desired number of nodes (required)")
 	spotCreateCmd.Flags().String("bidprice", "", "Maximum bid price (required)")
+	spotCreateCmd.Flags().Bool("autoscaling", false, "Enable autoscaling for the spot nodepool")
+	spotCreateCmd.Flags().Int("min-nodes", 0, "Minimum number of nodes for autoscaling")
+	spotCreateCmd.Flags().Int("max-nodes", 0, "Maximum number of nodes for autoscaling")
 	spotCreateCmd.Flags().String("custom-labels", "", "Custom Labels to be added on the spot nodepool. eg: --custom-labels key1=value1,key2=value2")
 	spotCreateCmd.Flags().String("custom-annotations", "", "Custom Annotations to be added to the spot nodepool. eg: --custom-annotations key1=value1,key2=value2")
 	spotCreateCmd.Flags().String("custom-taints", "", "Custom taints to be added to the spot nodepool. eg: --custom-taints key1=value1,key2=value2")
@@ -272,19 +275,29 @@ var spotCreateCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("desired must be a valid integer: %w", err)
 		}
+
+		// Autoscaling is required by the API on create. Always send it; default
+		// to a fixed-size pool (disabled, min/max 0) unless flags override.
+		autoscalingEnabled, _ := cmd.Flags().GetBool("autoscaling")
+		minNodes, _ := cmd.Flags().GetInt("min-nodes")
+		maxNodes, _ := cmd.Flags().GetInt("max-nodes")
+
 		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{Org: org, RequireOrg: true})
 		if err != nil {
 			return err
 		}
 		pool, err := featnodepools.SpotCreate(cmd.Context(), appCtx, featnodepools.SpotCreateParams{
-			Org:               org,
-			Cloudspace:        cloudspace,
-			ServerClass:       serverClass,
-			Desired:           desired,
-			BidPrice:          bidPrice,
-			CustomLabels:      customLabels,
-			CustomAnnotations: customAnnotations,
-			Name:              name,
+			Org:                 org,
+			Cloudspace:          cloudspace,
+			ServerClass:         serverClass,
+			Desired:             desired,
+			BidPrice:            bidPrice,
+			CustomLabels:        customLabels,
+			CustomAnnotations:   customAnnotations,
+			Name:                name,
+			AutoscalingEnabled:  &autoscalingEnabled,
+			AutoscalingMinNodes: &minNodes,
+			AutoscalingMaxNodes: &maxNodes,
 		})
 		if err != nil {
 			return fmt.Errorf("%w", err)

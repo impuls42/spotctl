@@ -53,6 +53,10 @@ type SpotCreateParams struct {
 	CustomLabels      map[string]string `json:"customLabels,omitempty" jsonschema:"Custom labels for the node pool"`
 	CustomAnnotations map[string]string `json:"customAnnotations,omitempty" jsonschema:"Custom annotations for the node pool"`
 	Name              string            `json:"name,omitempty" jsonschema:"Optional explicit node pool name (UUID); generated if empty"`
+
+	AutoscalingEnabled  *bool `json:"autoscaling_enabled,omitempty" jsonschema:"Enable autoscaling; defaults to disabled"`
+	AutoscalingMinNodes *int  `json:"autoscaling_min_nodes,omitempty" jsonschema:"Minimum number of nodes for autoscaling"`
+	AutoscalingMaxNodes *int  `json:"autoscaling_max_nodes,omitempty" jsonschema:"Maximum number of nodes for autoscaling"`
 }
 
 type SpotUpdateParams struct {
@@ -129,6 +133,23 @@ func SpotCreate(ctx context.Context, appCtx *app.Context, params SpotCreateParam
 		name = uuid.NewString()
 	}
 
+	// Autoscaling is required by the API on create. Default to a fixed-size
+	// pool (disabled, min/max 0) unless flags request otherwise.
+	if params.AutoscalingMinNodes != nil && params.AutoscalingMaxNodes != nil &&
+		*params.AutoscalingMinNodes > *params.AutoscalingMaxNodes {
+		return nil, fmt.Errorf("autoscaling min nodes (%d) cannot be greater than max nodes (%d)", *params.AutoscalingMinNodes, *params.AutoscalingMaxNodes)
+	}
+	autoscaling := rxtspot.Autoscaling{}
+	if params.AutoscalingEnabled != nil {
+		autoscaling.Enabled = *params.AutoscalingEnabled
+	}
+	if params.AutoscalingMinNodes != nil {
+		autoscaling.MinNodes = int64(*params.AutoscalingMinNodes)
+	}
+	if params.AutoscalingMaxNodes != nil {
+		autoscaling.MaxNodes = int64(*params.AutoscalingMaxNodes)
+	}
+
 	pool := rxtspot.SpotNodePool{
 		Name:              name,
 		Org:               org,
@@ -138,6 +159,7 @@ func SpotCreate(ctx context.Context, appCtx *app.Context, params SpotCreateParam
 		BidPrice:          cleanBidPrice,
 		CustomLabels:      params.CustomLabels,
 		CustomAnnotations: params.CustomAnnotations,
+		Autoscaling:       &autoscaling,
 	}
 
 	if err := appCtx.Client.GetAPI().CreateSpotNodePool(ctx, org, pool); err != nil {
@@ -180,49 +202,42 @@ func SpotUpdate(ctx context.Context, appCtx *app.Context, params SpotUpdateParam
 		}
 	}
 
-	// Preserve current fields unless explicitly overridden.
-	updated := rxtspot.SpotNodePool{
-		Name:       current.Name,
-		Org:        org,
-		Cloudspace: params.Cloudspace,
-		// Keep serverclass from current; CLI doesn't allow changing it.
-		ServerClass:       current.ServerClass,
-		Desired:           current.Desired,
+	// Build update options; current values are preserved as defaults.
+	opts := rxtspot.SpotNodePoolUpdateOptions{
+		Name:              params.Name,
+		Desired:           params.Desired,
 		BidPrice:          cleanBidPrice,
-		CustomLabels:      current.CustomLabels,
-		CustomAnnotations: current.CustomAnnotations,
+		CustomLabels:      params.CustomLabels,
+		CustomAnnotations: params.CustomAnnotations,
 	}
 
-	if params.Desired != nil {
-		updated.Desired = *params.Desired
+	// Validate autoscaling parameters
+	if params.AutoscalingMinNodes != nil && params.AutoscalingMaxNodes != nil {
+		if *params.AutoscalingMinNodes < 0 || *params.AutoscalingMaxNodes < 0 {
+			return nil, fmt.Errorf("autoscaling min and max nodes must be non-negative")
+		}
+		if *params.AutoscalingMinNodes > *params.AutoscalingMaxNodes {
+			return nil, fmt.Errorf("autoscaling min nodes (%d) cannot be greater than max nodes (%d)", *params.AutoscalingMinNodes, *params.AutoscalingMaxNodes)
+		}
 	}
-	if params.CustomLabels != nil {
-		updated.CustomLabels = params.CustomLabels
-	}
-	if params.CustomAnnotations != nil {
-		updated.CustomAnnotations = params.CustomAnnotations
-	}
-
-		// Validate autoscaling parameters
-		if params.AutoscalingMinNodes != nil && params.AutoscalingMaxNodes != nil {
-			if *params.AutoscalingMinNodes < 0 || *params.AutoscalingMaxNodes < 0 {
-				return nil, fmt.Errorf("autoscaling min and max nodes must be non-negative")
-			}
-			if *params.AutoscalingMinNodes > *params.AutoscalingMaxNodes {
-				return nil, fmt.Errorf("autoscaling min nodes (%d) cannot be greater than max nodes (%d)", *params.AutoscalingMinNodes, *params.AutoscalingMaxNodes)
-			}
+	if params.AutoscalingEnabled != nil || params.AutoscalingMinNodes != nil || params.AutoscalingMaxNodes != nil {
+		autoscaling := rxtspot.Autoscaling{}
+		if current.Autoscaling != nil {
+			autoscaling = *current.Autoscaling
 		}
 		if params.AutoscalingEnabled != nil {
-			updated.Autoscaling.Enabled = *params.AutoscalingEnabled
+			autoscaling.Enabled = *params.AutoscalingEnabled
 		}
 		if params.AutoscalingMinNodes != nil {
-			updated.Autoscaling.MinNodes = int64(*params.AutoscalingMinNodes)
+			autoscaling.MinNodes = int64(*params.AutoscalingMinNodes)
 		}
 		if params.AutoscalingMaxNodes != nil {
-			updated.Autoscaling.MaxNodes = int64(*params.AutoscalingMaxNodes)
+			autoscaling.MaxNodes = int64(*params.AutoscalingMaxNodes)
 		}
+		opts.Autoscaling = &autoscaling
+	}
 
-	if err := appCtx.Client.GetAPI().UpdateSpotNodePool(ctx, org, updated); err != nil {
+	if err := appCtx.Client.GetAPI().UpdateSpotNodePool(ctx, org, opts); err != nil {
 		return nil, err
 	}
 	return appCtx.Client.GetAPI().GetSpotNodePool(ctx, org, params.Name)
@@ -359,47 +374,41 @@ func OnDemandUpdate(ctx context.Context, appCtx *app.Context, params OnDemandUpd
 		return nil, err
 	}
 
-	updated := rxtspot.OnDemandNodePool{
-		Name:       current.Name,
-		Org:        org,
-		Cloudspace: params.Cloudspace,
-		// Keep serverclass from current; CLI doesn't allow changing it.
-		ServerClass:       current.ServerClass,
-		Desired:           current.Desired,
-		CustomLabels:      current.CustomLabels,
-		CustomAnnotations: current.CustomAnnotations,
+	// Build update options; current values are preserved as defaults.
+	opts := rxtspot.OnDemandNodePoolUpdateOptions{
+		Name:              params.Name,
+		Desired:           params.Desired,
+		CustomLabels:      params.CustomLabels,
+		CustomAnnotations: params.CustomAnnotations,
 	}
 
-	if params.Desired != nil {
-		updated.Desired = *params.Desired
+	// Validate autoscaling parameters
+	if params.AutoscalingMinNodes != nil && params.AutoscalingMaxNodes != nil {
+		if *params.AutoscalingMinNodes < 0 || *params.AutoscalingMaxNodes < 0 {
+			return nil, fmt.Errorf("autoscaling min and max nodes must be non-negative")
+		}
+		if *params.AutoscalingMinNodes > *params.AutoscalingMaxNodes {
+			return nil, fmt.Errorf("autoscaling min nodes (%d) cannot be greater than max nodes (%d)", *params.AutoscalingMinNodes, *params.AutoscalingMaxNodes)
+		}
 	}
-	if params.CustomLabels != nil {
-		updated.CustomLabels = params.CustomLabels
-	}
-	if params.CustomAnnotations != nil {
-		updated.CustomAnnotations = params.CustomAnnotations
-	}
-
-		// Validate autoscaling parameters
-		if params.AutoscalingMinNodes != nil && params.AutoscalingMaxNodes != nil {
-			if *params.AutoscalingMinNodes < 0 || *params.AutoscalingMaxNodes < 0 {
-				return nil, fmt.Errorf("autoscaling min and max nodes must be non-negative")
-			}
-			if *params.AutoscalingMinNodes > *params.AutoscalingMaxNodes {
-				return nil, fmt.Errorf("autoscaling min nodes (%d) cannot be greater than max nodes (%d)", *params.AutoscalingMinNodes, *params.AutoscalingMaxNodes)
-			}
+	if params.AutoscalingEnabled != nil || params.AutoscalingMinNodes != nil || params.AutoscalingMaxNodes != nil {
+		autoscaling := rxtspot.Autoscaling{}
+		if current.Autoscaling != nil {
+			autoscaling = *current.Autoscaling
 		}
 		if params.AutoscalingEnabled != nil {
-			updated.Autoscaling.Enabled = *params.AutoscalingEnabled
+			autoscaling.Enabled = *params.AutoscalingEnabled
 		}
 		if params.AutoscalingMinNodes != nil {
-			updated.Autoscaling.MinNodes = *params.AutoscalingMinNodes
+			autoscaling.MinNodes = int64(*params.AutoscalingMinNodes)
 		}
 		if params.AutoscalingMaxNodes != nil {
-			updated.Autoscaling.MaxNodes = *params.AutoscalingMaxNodes
+			autoscaling.MaxNodes = int64(*params.AutoscalingMaxNodes)
 		}
+		opts.Autoscaling = &autoscaling
+	}
 
-	if err := appCtx.Client.GetAPI().UpdateOnDemandNodePool(ctx, org, updated); err != nil {
+	if err := appCtx.Client.GetAPI().UpdateOnDemandNodePool(ctx, org, opts); err != nil {
 		return nil, err
 	}
 	return appCtx.Client.GetAPI().GetOnDemandNodePool(ctx, org, params.Name)
