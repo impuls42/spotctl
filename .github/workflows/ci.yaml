@@ -16,14 +16,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup git auth for private Go modules
-        env:
-          WORKFLOW_TOKEN: ${{ secrets.WORKFLOW_TOKEN }}
-        run: |
-          if [ -n "${WORKFLOW_TOKEN}" ]; then
-            git config --global url."https://x-access-token:${WORKFLOW_TOKEN}@github.com/".insteadOf "https://github.com/"
-          fi
-
       - name: Set up Go
         uses: actions/setup-go@v5
         with:

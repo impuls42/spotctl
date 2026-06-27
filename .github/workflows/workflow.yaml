@@ -20,12 +20,6 @@ jobs:
         with:
           fetch-depth: 0  # Ensure tags and history are available for versioning/changelog
 
-      - name: Setup git auth for private Go modules
-        env:
-          WORKFLOW_TOKEN: ${{ secrets.WORKFLOW_TOKEN }}
-        run: |
-          git config --global url."https://x-access-token:${WORKFLOW_TOKEN}@github.com/".insteadOf "https://github.com/"
-
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -48,7 +42,7 @@ jobs:
           version: '~> v2'
           args: release --clean
         env:
-          GITHUB_TOKEN: ${{ secrets.WORKFLOW_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSPHRASE }}
 
       - name: Clean up signing key
