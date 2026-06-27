@@ -117,9 +117,20 @@ dev: fmt vet test build
 .PHONY: ci
 ci: deps fmt vet test build
 
-# Release workflow: clean, deps, fmt, vet, test, build-all
+# Release workflow: produce signed, versioned artifacts via GoReleaser.
+# Requires goreleaser (https://goreleaser.com) and a git tag.
 .PHONY: release
-release: clean deps fmt vet test build-all-named
+release:
+	goreleaser release --clean
+
+# Local snapshot release (no publish, no signing, no tag required)
+.PHONY: release-snapshot
+release-snapshot:
+	goreleaser release --snapshot --clean --skip=sign,publish
+
+# Legacy local cross-compile (no archives/checksums/signing)
+.PHONY: release-local
+release-local: clean deps fmt vet test build-all-named
 
 # Show help
 .PHONY: help

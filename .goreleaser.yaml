@@ -1,0 +1,84 @@
+# GoReleaser configuration for spotctl
+# Docs: https://goreleaser.com
+version: 2
+
+project_name: spotctl
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: spotctl
+    main: .
+    binary: spotctl
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      # No Windows/arm64 build (matches prior release matrix)
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X github.com/rackspace-spot/spotctl/internal/version.Version={{.Version}}
+      - -X github.com/rackspace-spot/spotctl/internal/version.Commit={{.ShortCommit}}
+      - -X github.com/rackspace-spot/spotctl/internal/version.BuildDate={{.Date}}
+
+archives:
+  - id: spotctl
+    ids:
+      - spotctl
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - README.md
+      - LICENSE
+      - docs/*
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+# Sign every released artifact (binaries archives + checksums) with cosign.
+# Requires cosign.key (written from secret in CI) and COSIGN_PASSWORD in env.
+signs:
+  - cmd: cosign
+    artifacts: all
+    output: true
+    args:
+      - sign-blob
+      - "--key=cosign.key"
+      - "--output-signature=${signature}"
+      - "${artifact}"
+      - "--yes"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "merge"
+
+release:
+  draft: false
+  prerelease: auto
+  name_template: "spotctl {{ .Tag }}"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot-{{ .ShortCommit }}"
