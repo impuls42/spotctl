@@ -199,46 +199,17 @@ func Update(ctx context.Context, appCtx *app.Context, org string, params UpdateP
 		return nil, fmt.Errorf("cloudspace name is required")
 	}
 
-	// Get current cloudspace
-	current, err := appCtx.Client.GetAPI().GetCloudspace(ctx, org, params.Name)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get cloudspace %q: %w", params.Name, err)
-	}
-
-	// Build update object with fields that are changing
-	update := rxtspot.CloudSpace{
-		Name:   params.Name,
-		Org:    org,
-		Region: current.Region,
-	}
-
-	// Preserve existing fields for update
-	update.KubernetesVersion = current.KubernetesVersion
-	update.PreemptionWebhookURL = current.PreemptionWebhookURL
-	update.CNI = current.CNI
-	update.GpuEnabled = current.GpuEnabled
-
-	// Update only the fields provided
-	if params.KubernetesVersion != nil {
-		update.KubernetesVersion = *params.KubernetesVersion
-	}
-	if params.CNI != nil {
-		update.CNI = *params.CNI
-	}
-	if params.PreemptionWebhookURL != nil {
-		update.PreemptionWebhookURL = *params.PreemptionWebhookURL
-	}
-
-	// Note: HAControlPlane is available in the SDK UpdateCloudspace method but requires
-	// explicit API field handling. Currently preserved as-is.
-	if params.HAControlPlane != nil {
-		// HAControlPlane field is supported by the API but the CloudSpace struct 
-		// doesn't expose it directly. This is preserved for future SDK enhancements.
-		_ = params.HAControlPlane
+	// Build update options; nil fields are omitted and left unchanged by the API.
+	opts := rxtspot.CloudSpaceUpdateOptions{
+		Name:                 params.Name,
+		KubernetesVersion:    params.KubernetesVersion,
+		PreemptionWebhookURL: params.PreemptionWebhookURL,
+		CNI:                  params.CNI,
+		HAControlPlane:       params.HAControlPlane,
 	}
 
 	// Call UpdateCloudspace to apply changes
-	if err := appCtx.Client.GetAPI().UpdateCloudspace(ctx, org, update); err != nil {
+	if _, err := appCtx.Client.GetAPI().UpdateCloudspace(ctx, org, opts); err != nil {
 		return nil, fmt.Errorf("failed to update cloudspace %q: %w", params.Name, err)
 	}
 
