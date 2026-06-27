@@ -14,10 +14,10 @@ import (
 	"github.com/google/uuid"
 	rxtspot "github.com/rackspace-spot/spot-go-sdk/api/v1"
 	"github.com/rackspace-spot/spotctl/internal"
-	config "github.com/rackspace-spot/spotctl/pkg"
+	"github.com/rackspace-spot/spotctl/internal/app"
+	featvmcs "github.com/rackspace-spot/spotctl/internal/features/vmcloudspaces"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
-	"k8s.io/klog/v2"
 )
 
 // createVMCloudSpaceParams holds all parameters needed for VM cloudspace creation
@@ -87,24 +87,13 @@ var vmcsListCmd = &cobra.Command{
 	Short: "List VM cloudspaces",
 	Long:  `List all VM cloudspaces in an organization.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.GetCLIEssentials(cmd)
-		if err != nil {
-			return fmt.Errorf("failed to get CLI configuration: %w", err)
-		}
 		org, _ := cmd.Flags().GetString("org")
-		if org == "" && cfg != nil && cfg.Org != "" {
-			org = cfg.Org
-		}
-		if org == "" {
-			return fmt.Errorf("organization not specified (use --org or run 'spotctl configure')")
-		}
-
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{Org: org, RequireOrg: true})
 		if err != nil {
-			return fmt.Errorf("%w", err)
+			return err
 		}
 
-		vmCloudSpaces, err := client.GetAPI().ListVMCloudSpaces(context.Background(), org)
+		vmCloudSpaces, err := featvmcs.List(cmd.Context(), appCtx, appCtx.Org)
 		if err != nil {
 			return fmt.Errorf("%w", err)
 		}
@@ -130,14 +119,11 @@ var vmcsCreateCmd = &cobra.Command{
 			cancel()
 		}()
 
-		cfg, err := config.GetCLIEssentials(cmd)
+		org, _ := cmd.Flags().GetString("org")
+		region, _ := cmd.Flags().GetString("region")
+		appCtx, err := app.Load(ctx, app.LoadOptions{Org: org, Region: region})
 		if err != nil {
-			return fmt.Errorf("failed to get CLI configuration: %w", err)
-		}
-
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
-		if err != nil {
-			return fmt.Errorf("failed to initialize client: %w", err)
+			return err
 		}
 
 		params, err := loadVMCSParamsFromFlags(cmd)
@@ -145,12 +131,13 @@ var vmcsCreateCmd = &cobra.Command{
 			return fmt.Errorf("failed to load parameters: %w", err)
 		}
 
-		// Set defaults from config
-		if params.Org == "" && cfg != nil && cfg.Org != "" {
-			params.Org = cfg.Org
+		// Fall back to resolved defaults (a config file passed via --config may
+		// already have set these, which takes precedence).
+		if params.Org == "" {
+			params.Org = appCtx.Org
 		}
-		if params.Region == "" && cfg != nil && cfg.Region != "" {
-			params.Region = cfg.Region
+		if params.Region == "" {
+			params.Region = appCtx.Region
 		}
 		if params.Name == "" {
 			return fmt.Errorf("name is required")
@@ -165,88 +152,21 @@ var vmcsCreateCmd = &cobra.Command{
 			return fmt.Errorf("vm-ssh-key-name is required")
 		}
 
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("operation cancelled")
-		default:
-		}
-
-		// Create VM cloudspace
-		vmcs := rxtspot.VMCloudSpace{
-			Name:        params.Name,
-			Org:         params.Org,
-			Region:      params.Region,
-			Webhook:     params.Webhook,
-			VMSshKeyRef: params.VMSshKeyRef,
-		}
-
-		if err := client.GetAPI().CreateVMCloudSpace(ctx, vmcs); err != nil {
-			return fmt.Errorf("failed to create VM cloudspace: %w", err)
-		}
-
-		// Handle cloud-init user data for inline VM pools
 		vmUserData, _ := cmd.Flags().GetString("vm-userdata")
 		vmUserDataFromScript, _ := cmd.Flags().GetString("vm-userdata-from-script")
 
-		if vmUserData != "" && vmUserDataFromScript != "" {
-			return fmt.Errorf("cannot specify both --vm-userdata and --vm-userdata-from-script")
-		}
-
-		var finalUserData string
-		if vmUserDataFromScript != "" {
-			finalUserData, err = rxtspot.PrepareUserDataFromScript(vmUserDataFromScript)
-			if err != nil {
-				return fmt.Errorf("failed to read user data script: %w", err)
-			}
-		} else if vmUserData != "" {
-			finalUserData = rxtspot.PrepareUserData(vmUserData)
-		}
-
-		// Create VM pools if any
-		for _, pool := range params.VMPools {
-			select {
-			case <-ctx.Done():
-				if err := client.GetAPI().DeleteVMCloudSpace(ctx, params.Org, params.Name); err != nil {
-					klog.Warningf("Failed to clean up VM cloudspace after cancellation: %v", err)
-				}
-				return fmt.Errorf("operation cancelled during VM pool creation")
-			default:
-			}
-
-			if pool.Name == "" {
-				pool.Name = uuid.NewString()
-			}
-
-			// Use pool-level userdata if set, otherwise use the flag-level userdata
-			poolUserData := pool.VMUserData
-			if poolUserData == "" {
-				poolUserData = finalUserData
-			}
-
-			vmPool := rxtspot.VMPool{
-				Name:         pool.Name,
-				VMCloudSpace: params.Name,
-				ServerClass:  pool.ServerClass,
-				BidPrice:     pool.BidPrice,
-				Desired:      pool.Desired,
-				PoolType:     pool.PoolType,
-				VMImage:      pool.VMImage,
-				VMUserData:   poolUserData,
-			}
-
-			if err := client.GetAPI().CreateVMPool(ctx, params.Org, vmPool); err != nil {
-				// Clean up the VM cloudspace on failure
-				if delErr := client.GetAPI().DeleteVMCloudSpace(ctx, params.Org, params.Name); delErr != nil {
-					klog.Warningf("Failed to clean up VM cloudspace: %v", delErr)
-				}
-				return fmt.Errorf("failed to create VM pool %s: %w", vmPool.Name, err)
-			}
-		}
-
-		// Fetch the created VM cloudspace for output
-		vmcsResult, err := client.GetAPI().GetVMCloudSpace(ctx, params.Org, params.Name)
+		vmcsResult, err := featvmcs.Create(ctx, appCtx, featvmcs.CreateParams{
+			Org:                params.Org,
+			Name:               params.Name,
+			Region:             params.Region,
+			Webhook:            params.Webhook,
+			VMSshKeyRef:        params.VMSshKeyRef,
+			VMPools:            params.VMPools,
+			UserData:           vmUserData,
+			UserDataFromScript: vmUserDataFromScript,
+		})
 		if err != nil {
-			return fmt.Errorf("failed to get VM cloudspace after creation: %w", err)
+			return err
 		}
 
 		fmt.Printf("\n%s Successfully created VM cloudspace %s in region %s\n",
@@ -270,25 +190,13 @@ var vmcsGetCmd = &cobra.Command{
 			return fmt.Errorf("name is required")
 		}
 
-		cfg, err := config.GetCLIEssentials(cmd)
-		if err != nil {
-			return fmt.Errorf("failed to get config: %w", err)
-		}
-
 		org, _ := cmd.Flags().GetString("org")
-		if org == "" && cfg != nil && cfg.Org != "" {
-			org = cfg.Org
-		}
-		if org == "" {
-			return fmt.Errorf("organization not specified (use --org or run 'spotctl configure')")
-		}
-
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{Org: org, RequireOrg: true})
 		if err != nil {
-			return fmt.Errorf("failed to initialize client: %w", err)
+			return err
 		}
 
-		vmcs, err := client.GetAPI().GetVMCloudSpace(context.Background(), org, name)
+		vmcs, err := featvmcs.Get(cmd.Context(), appCtx, appCtx.Org, name)
 		if err != nil {
 			if rxtspot.IsNotFound(err) {
 				return fmt.Errorf("VM cloudspace '%s' not found", name)
@@ -316,17 +224,10 @@ var vmcsDeleteCmd = &cobra.Command{
 			return fmt.Errorf("name is required")
 		}
 
-		cfg, err := config.GetCLIEssentials(cmd)
+		org, _ := cmd.Flags().GetString("org")
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{Org: org, RequireOrg: true})
 		if err != nil {
 			return err
-		}
-
-		org, _ := cmd.Flags().GetString("org")
-		if org == "" && cfg != nil && cfg.Org != "" {
-			org = cfg.Org
-		}
-		if org == "" {
-			return fmt.Errorf("organization not specified (use --org or run 'spotctl configure')")
 		}
 
 		yes, _ := cmd.Flags().GetBool("yes")
@@ -342,12 +243,7 @@ var vmcsDeleteCmd = &cobra.Command{
 			}
 		}
 
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
-		if err != nil {
-			return fmt.Errorf("failed to create client: %w", err)
-		}
-
-		err = client.GetAPI().DeleteVMCloudSpace(context.Background(), org, name)
+		err = featvmcs.Delete(cmd.Context(), appCtx, appCtx.Org, name)
 		if err != nil {
 			if rxtspot.IsNotFound(err) {
 				return fmt.Errorf("VM cloudspace '%s' not found", name)
@@ -377,32 +273,15 @@ var vmcsUpdateCmd = &cobra.Command{
 			return fmt.Errorf("name is required")
 		}
 
-		cfg, err := config.GetCLIEssentials(cmd)
-		if err != nil {
-			return fmt.Errorf("failed to get config: %w", err)
-		}
-
 		org, _ := cmd.Flags().GetString("org")
-		if org == "" && cfg != nil && cfg.Org != "" {
-			org = cfg.Org
-		}
-		if org == "" {
-			return fmt.Errorf("organization not specified (use --org or run 'spotctl configure')")
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{Org: org, RequireOrg: true})
+		if err != nil {
+			return err
 		}
 
 		webhook, _ := cmd.Flags().GetString("webhook")
 
-		vmcs := rxtspot.VMCloudSpace{
-			Name:    name,
-			Webhook: webhook,
-		}
-
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
-		if err != nil {
-			return fmt.Errorf("failed to initialize client: %w", err)
-		}
-
-		if err := client.GetAPI().UpdateVMCloudSpace(context.Background(), org, vmcs); err != nil {
+		if err := featvmcs.Update(cmd.Context(), appCtx, appCtx.Org, name, webhook); err != nil {
 			if rxtspot.IsNotFound(err) {
 				return fmt.Errorf("VM cloudspace '%s' not found", name)
 			}

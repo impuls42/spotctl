@@ -292,38 +292,6 @@ var cloudspacesCreateCmd = &cobra.Command{
 	},
 }
 
-// handleSpotNodePoolCreation handles the creation of a spot node pool
-func handleSpotNodePoolCreation(ctx context.Context, client *internal.Client, org string, cloudspaceName string, spotPool rxtspot.SpotNodePool) error {
-	createErr := client.GetAPI().CreateSpotNodePool(ctx, org, spotPool)
-	if createErr != nil {
-		err := client.GetAPI().DeleteCloudspace(ctx, org, cloudspaceName)
-		if err != nil {
-			return fmt.Errorf("failed to delete cloudspace %s: %w", cloudspaceName, err)
-		}
-		return fmt.Errorf("failed to create spot node pool %s : %w", spotPool.Name, createErr)
-	}
-	if _, verifyErr := client.GetAPI().GetSpotNodePool(ctx, org, spotPool.Name); verifyErr != nil {
-		return fmt.Errorf("failed to verify creation of spot node pool %s: %w", spotPool.Name, verifyErr)
-	}
-	return nil
-}
-
-// handleOnDemandNodePoolCreation handles the creation of an on-demand node pool
-func handleOnDemandNodePoolCreation(ctx context.Context, client *internal.Client, org string, cloudspaceName string, onDemandPool rxtspot.OnDemandNodePool) error {
-	createErr := client.GetAPI().CreateOnDemandNodePool(ctx, org, onDemandPool)
-	if createErr != nil {
-		err := client.GetAPI().DeleteCloudspace(ctx, org, cloudspaceName)
-		if err != nil {
-			return fmt.Errorf("failed to delete cloudspace %s: %w", cloudspaceName, err)
-		}
-		return fmt.Errorf("failed to create on-demand node pool %s : %w", onDemandPool.Name, createErr)
-	}
-	if _, verifyErr := client.GetAPI().GetOnDemandNodePool(ctx, org, onDemandPool.Name); verifyErr != nil {
-		return fmt.Errorf("failed to verify creation of on-demand node pool %s: %w", onDemandPool.Name, verifyErr)
-	}
-	return nil
-}
-
 // cloudspacesGetCmd represents the cloudspaces get command
 var cloudspacesGetCmd = &cobra.Command{
 	Use:   "get",

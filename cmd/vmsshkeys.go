@@ -1,13 +1,13 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/fatih/color"
 	rxtspot "github.com/rackspace-spot/spot-go-sdk/api/v1"
 	"github.com/rackspace-spot/spotctl/internal"
-	config "github.com/rackspace-spot/spotctl/pkg"
+	"github.com/rackspace-spot/spotctl/internal/app"
+	featvmsshkeys "github.com/rackspace-spot/spotctl/internal/features/vmsshkeys"
 	"github.com/spf13/cobra"
 )
 
@@ -54,24 +54,13 @@ var vmSSHKeyListCmd = &cobra.Command{
 	Short: "List VM SSH keys",
 	Long:  `List all VM SSH keys in an organization.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.GetCLIEssentials(cmd)
-		if err != nil {
-			return fmt.Errorf("failed to get config: %w", err)
-		}
 		org, _ := cmd.Flags().GetString("org")
-		if org == "" && cfg != nil && cfg.Org != "" {
-			org = cfg.Org
-		}
-		if org == "" {
-			return fmt.Errorf("organization not specified (use --org or run 'spotctl configure')")
-		}
-
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{Org: org, RequireOrg: true})
 		if err != nil {
-			return fmt.Errorf("%w", err)
+			return err
 		}
 
-		keys, err := client.GetAPI().ListVMSSHKeys(context.Background(), org)
+		keys, err := featvmsshkeys.List(cmd.Context(), appCtx, appCtx.Org)
 		if err != nil {
 			return fmt.Errorf("%w", err)
 		}
@@ -85,36 +74,22 @@ var vmSSHKeyCreateCmd = &cobra.Command{
 	Short: "Create a VM SSH key",
 	Long:  `Create a new VM SSH key.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.GetCLIEssentials(cmd)
-		if err != nil {
-			return fmt.Errorf("failed to get CLI configuration: %w", err)
-		}
-
 		org, _ := cmd.Flags().GetString("org")
-		if org == "" && cfg != nil && cfg.Org != "" {
-			org = cfg.Org
-		}
-		if org == "" {
-			return fmt.Errorf("organization not specified (use --org or run 'spotctl configure')")
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{Org: org, RequireOrg: true})
+		if err != nil {
+			return err
 		}
 
 		name, _ := cmd.Flags().GetString("name")
 		publicKey, _ := cmd.Flags().GetString("public-key")
 		description, _ := cmd.Flags().GetString("description")
 
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
-		if err != nil {
-			return fmt.Errorf("failed to initialize client: %w", err)
-		}
-
-		key := rxtspot.VMSSHKey{
+		if err := featvmsshkeys.Create(cmd.Context(), appCtx, featvmsshkeys.CreateParams{
+			Org:         appCtx.Org,
 			Name:        name,
-			Org:         org,
 			PublicKey:   publicKey,
 			Description: description,
-		}
-
-		if err := client.GetAPI().CreateVMSSHKey(context.Background(), key); err != nil {
+		}); err != nil {
 			return fmt.Errorf("failed to create VM SSH key: %w", err)
 		}
 
@@ -133,26 +108,13 @@ var vmSSHKeyGetCmd = &cobra.Command{
 	Long:  `Get details about a specific VM SSH key.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name, _ := cmd.Flags().GetString("name")
-
-		cfg, err := config.GetCLIEssentials(cmd)
-		if err != nil {
-			return fmt.Errorf("failed to get config: %w", err)
-		}
-
 		org, _ := cmd.Flags().GetString("org")
-		if org == "" && cfg != nil && cfg.Org != "" {
-			org = cfg.Org
-		}
-		if org == "" {
-			return fmt.Errorf("organization not specified (use --org or run 'spotctl configure')")
-		}
-
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{Org: org, RequireOrg: true})
 		if err != nil {
-			return fmt.Errorf("failed to initialize client: %w", err)
+			return err
 		}
 
-		key, err := client.GetAPI().GetVMSSHKey(context.Background(), org, name)
+		key, err := featvmsshkeys.Get(cmd.Context(), appCtx, appCtx.Org, name)
 		if err != nil {
 			if rxtspot.IsNotFound(err) {
 				return fmt.Errorf("VM SSH key '%s' not found", name)
@@ -170,18 +132,10 @@ var vmSSHKeyDeleteCmd = &cobra.Command{
 	Long:  `Delete a VM SSH key.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name, _ := cmd.Flags().GetString("name")
-
-		cfg, err := config.GetCLIEssentials(cmd)
+		org, _ := cmd.Flags().GetString("org")
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{Org: org, RequireOrg: true})
 		if err != nil {
 			return err
-		}
-
-		org, _ := cmd.Flags().GetString("org")
-		if org == "" && cfg != nil && cfg.Org != "" {
-			org = cfg.Org
-		}
-		if org == "" {
-			return fmt.Errorf("organization not specified (use --org or run 'spotctl configure')")
 		}
 
 		yes, _ := cmd.Flags().GetBool("yes")
@@ -197,12 +151,7 @@ var vmSSHKeyDeleteCmd = &cobra.Command{
 			}
 		}
 
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
-		if err != nil {
-			return fmt.Errorf("failed to create client: %w", err)
-		}
-
-		if err := client.GetAPI().DeleteVMSSHKey(context.Background(), org, name); err != nil {
+		if err := featvmsshkeys.Delete(cmd.Context(), appCtx, appCtx.Org, name); err != nil {
 			if rxtspot.IsNotFound(err) {
 				return fmt.Errorf("VM SSH key '%s' not found", name)
 			}

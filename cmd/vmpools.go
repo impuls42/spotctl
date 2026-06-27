@@ -1,14 +1,14 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/fatih/color"
 	"github.com/google/uuid"
 	rxtspot "github.com/rackspace-spot/spot-go-sdk/api/v1"
 	"github.com/rackspace-spot/spotctl/internal"
-	config "github.com/rackspace-spot/spotctl/pkg"
+	"github.com/rackspace-spot/spotctl/internal/app"
+	featvmpools "github.com/rackspace-spot/spotctl/internal/features/vmpools"
 	"github.com/spf13/cobra"
 )
 
@@ -71,26 +71,15 @@ var vmPoolListCmd = &cobra.Command{
 	Short: "List VM pools",
 	Long:  `List all VM pools for a VM cloudspace.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.GetCLIEssentials(cmd)
-		if err != nil {
-			return fmt.Errorf("failed to get CLI configuration: %w", err)
-		}
 		org, _ := cmd.Flags().GetString("org")
-		if org == "" && cfg != nil && cfg.Org != "" {
-			org = cfg.Org
-		}
-		if org == "" {
-			return fmt.Errorf("organization not specified (use --org or run 'spotctl configure')")
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{Org: org, RequireOrg: true})
+		if err != nil {
+			return err
 		}
 
 		vmCloudSpace, _ := cmd.Flags().GetString("vmcloudspace")
 
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
-		if err != nil {
-			return fmt.Errorf("%w", err)
-		}
-
-		pools, err := client.GetAPI().ListVMPools(context.Background(), org, vmCloudSpace)
+		pools, err := featvmpools.List(cmd.Context(), appCtx, appCtx.Org, vmCloudSpace)
 		if err != nil {
 			return fmt.Errorf("%w", err)
 		}
@@ -104,17 +93,10 @@ var vmPoolCreateCmd = &cobra.Command{
 	Short: "Create a VM pool",
 	Long:  `Create a new VM pool in a VM cloudspace.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.GetCLIEssentials(cmd)
-		if err != nil {
-			return fmt.Errorf("failed to get CLI configuration: %w", err)
-		}
-
 		org, _ := cmd.Flags().GetString("org")
-		if org == "" && cfg != nil && cfg.Org != "" {
-			org = cfg.Org
-		}
-		if org == "" {
-			return fmt.Errorf("organization not specified (use --org or run 'spotctl configure')")
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{Org: org, RequireOrg: true})
+		if err != nil {
+			return err
 		}
 
 		vmPoolName, _ := cmd.Flags().GetString("name")
@@ -138,41 +120,22 @@ var vmPoolCreateCmd = &cobra.Command{
 			return fmt.Errorf("invalid desired count: %w", err)
 		}
 
-		// Handle cloud-init user data
 		vmUserData, _ := cmd.Flags().GetString("vm-userdata")
 		vmUserDataFromScript, _ := cmd.Flags().GetString("vm-userdata-from-script")
 
-		if vmUserData != "" && vmUserDataFromScript != "" {
-			return fmt.Errorf("cannot specify both --vm-userdata and --vm-userdata-from-script")
-		}
-
-		var finalUserData string
-		if vmUserDataFromScript != "" {
-			finalUserData, err = rxtspot.PrepareUserDataFromScript(vmUserDataFromScript)
-			if err != nil {
-				return fmt.Errorf("failed to read user data script: %w", err)
-			}
-		} else if vmUserData != "" {
-			finalUserData = rxtspot.PrepareUserData(vmUserData)
-		}
-
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
+		pool, err := featvmpools.Create(cmd.Context(), appCtx, featvmpools.CreateParams{
+			Org:                appCtx.Org,
+			Name:               vmPoolName,
+			VMCloudSpace:       vmCloudSpace,
+			ServerClass:        serverClass,
+			BidPrice:           validatedPrice,
+			Desired:            validateDesired,
+			PoolType:           poolType,
+			VMImage:            vmImage,
+			UserData:           vmUserData,
+			UserDataFromScript: vmUserDataFromScript,
+		})
 		if err != nil {
-			return fmt.Errorf("failed to initialize client: %w", err)
-		}
-
-		pool := rxtspot.VMPool{
-			Name:         vmPoolName,
-			VMCloudSpace: vmCloudSpace,
-			ServerClass:  serverClass,
-			BidPrice:     validatedPrice,
-			Desired:      validateDesired,
-			PoolType:     poolType,
-			VMImage:      vmImage,
-			VMUserData:   finalUserData,
-		}
-
-		if err := client.GetAPI().CreateVMPool(context.Background(), org, pool); err != nil {
 			return fmt.Errorf("failed to create VM pool: %w", err)
 		}
 
@@ -186,7 +149,7 @@ var vmPoolCreateCmd = &cobra.Command{
 		fmt.Printf("  Desired: %s\n", color.CyanString(fmt.Sprintf("%d", validateDesired)))
 		fmt.Printf("  Pool Type: %s\n", color.CyanString(poolType))
 		fmt.Printf("  VM Image: %s\n", color.CyanString(vmImage))
-		if finalUserData != "" {
+		if pool.VMUserData != "" {
 			fmt.Printf("  VM UserData: %s (base64-encoded)\n", color.CyanString("provided"))
 		}
 
@@ -200,26 +163,13 @@ var vmPoolGetCmd = &cobra.Command{
 	Long:  `Get details about a specific VM pool.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name, _ := cmd.Flags().GetString("name")
-
-		cfg, err := config.GetCLIEssentials(cmd)
-		if err != nil {
-			return fmt.Errorf("failed to get config: %w", err)
-		}
-
 		org, _ := cmd.Flags().GetString("org")
-		if org == "" && cfg != nil && cfg.Org != "" {
-			org = cfg.Org
-		}
-		if org == "" {
-			return fmt.Errorf("organization not specified (use --org or run 'spotctl configure')")
-		}
-
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{Org: org, RequireOrg: true})
 		if err != nil {
-			return fmt.Errorf("failed to initialize client: %w", err)
+			return err
 		}
 
-		pool, err := client.GetAPI().GetVMPool(context.Background(), org, name)
+		pool, err := featvmpools.Get(cmd.Context(), appCtx, appCtx.Org, name)
 		if err != nil {
 			if rxtspot.IsNotFound(err) {
 				return fmt.Errorf("VM pool '%s' not found", name)
@@ -237,18 +187,10 @@ var vmPoolUpdateCmd = &cobra.Command{
 	Long:  `Update an existing VM pool's desired count or bid price.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name, _ := cmd.Flags().GetString("name")
-
-		cfg, err := config.GetCLIEssentials(cmd)
-		if err != nil {
-			return fmt.Errorf("failed to get config: %w", err)
-		}
-
 		org, _ := cmd.Flags().GetString("org")
-		if org == "" && cfg != nil && cfg.Org != "" {
-			org = cfg.Org
-		}
-		if org == "" {
-			return fmt.Errorf("organization not specified (use --org or run 'spotctl configure')")
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{Org: org, RequireOrg: true})
+		if err != nil {
+			return err
 		}
 
 		desired, _ := cmd.Flags().GetInt("desired")
@@ -258,27 +200,20 @@ var vmPoolUpdateCmd = &cobra.Command{
 			return fmt.Errorf("at least one of --desired or --bidprice must be provided")
 		}
 
-		pool := rxtspot.VMPool{
-			Name: name,
-		}
-
-		if desired >= 0 {
-			pool.Desired = desired
-		}
+		validatedPrice := ""
 		if bidPrice != "" {
-			validatedPrice, err := validateBidPrice(bidPrice)
+			validatedPrice, err = validateBidPrice(bidPrice)
 			if err != nil {
 				return fmt.Errorf("invalid bid price: %w", err)
 			}
-			pool.BidPrice = validatedPrice
 		}
 
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
-		if err != nil {
-			return fmt.Errorf("failed to initialize client: %w", err)
-		}
-
-		if err := client.GetAPI().UpdateVMPool(context.Background(), org, pool); err != nil {
+		if err := featvmpools.Update(cmd.Context(), appCtx, featvmpools.UpdateParams{
+			Org:      appCtx.Org,
+			Name:     name,
+			Desired:  desired,
+			BidPrice: validatedPrice,
+		}); err != nil {
 			return fmt.Errorf("failed to update VM pool: %w", err)
 		}
 
@@ -293,18 +228,10 @@ var vmPoolDeleteCmd = &cobra.Command{
 	Long:  `Delete a VM pool.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name, _ := cmd.Flags().GetString("name")
-
-		cfg, err := config.GetCLIEssentials(cmd)
+		org, _ := cmd.Flags().GetString("org")
+		appCtx, err := app.Load(cmd.Context(), app.LoadOptions{Org: org, RequireOrg: true})
 		if err != nil {
 			return err
-		}
-
-		org, _ := cmd.Flags().GetString("org")
-		if org == "" && cfg != nil && cfg.Org != "" {
-			org = cfg.Org
-		}
-		if org == "" {
-			return fmt.Errorf("organization not specified (use --org or run 'spotctl configure')")
 		}
 
 		yes, _ := cmd.Flags().GetBool("yes")
@@ -320,12 +247,7 @@ var vmPoolDeleteCmd = &cobra.Command{
 			}
 		}
 
-		client, err := internal.NewClientWithTokens(cfg.RefreshToken, cfg.AccessToken)
-		if err != nil {
-			return fmt.Errorf("failed to create client: %w", err)
-		}
-
-		if err := client.GetAPI().DeleteVMPool(context.Background(), org, name); err != nil {
+		if err := featvmpools.Delete(cmd.Context(), appCtx, appCtx.Org, name); err != nil {
 			if rxtspot.IsNotFound(err) {
 				return fmt.Errorf("VM pool '%s' not found", name)
 			}
