@@ -13,4 +13,3 @@ func GetAll(ctx context.Context, appCtx *app.Context) (any, error) {
 func GetForServerClass(ctx context.Context, appCtx *app.Context, serverClass string) (any, error) {
 	return appCtx.Client.GetAPI().GetPriceDetailsForServerClass(ctx, serverClass)
 }
-

@@ -113,10 +113,10 @@ type CloudspacesDeleteParams struct {
 }
 
 type CloudspacesUpdateParams struct {
-	Org                  string `json:"org,omitempty" jsonschema:"Organization ID; falls back to configured org if empty"`
-	Name                 string `json:"name" jsonschema:"Cloudspace name"`
+	Org                  string  `json:"org,omitempty" jsonschema:"Organization ID; falls back to configured org if empty"`
+	Name                 string  `json:"name" jsonschema:"Cloudspace name"`
 	KubernetesVersion    *string `json:"kubernetes_version,omitempty" jsonschema:"Kubernetes version; if omitted, unchanged"`
-	HAControlPlane       *bool `json:"ha_control_plane,omitempty" jsonschema:"Enable or disable HA control plane; if omitted, unchanged"`
+	HAControlPlane       *bool   `json:"ha_control_plane,omitempty" jsonschema:"Enable or disable HA control plane; if omitted, unchanged"`
 	PreemptionWebhookURL *string `json:"preemption_webhook_url,omitempty" jsonschema:"Preemption webhook URL; if omitted, unchanged"`
 	CNI                  *string `json:"cni,omitempty" jsonschema:"Container Network Interface (CNI) plugin; if omitted, unchanged"`
 }
@@ -637,4 +637,3 @@ func registerNodepoolsTools(server *mcp.Server) {
 		return textResult(fmt.Sprintf("on-demand node pool %q deleted", params.Name))
 	})
 }
-

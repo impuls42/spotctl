@@ -61,4 +61,3 @@ func Load(ctx context.Context, opts LoadOptions) (*Context, error) {
 		Region: region,
 	}, nil
 }
-

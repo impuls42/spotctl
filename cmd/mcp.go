@@ -53,4 +53,3 @@ func init() {
 	mcpCmd.Flags().StringVar(&mcpTransport, "transport", "stdio", "MCP transport to use (stdio or http)")
 	mcpCmd.Flags().StringVar(&mcpAddr, "addr", "localhost:8080", "Address for HTTP MCP server (host:port)")
 }
-

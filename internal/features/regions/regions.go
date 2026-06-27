@@ -14,4 +14,3 @@ func List(ctx context.Context, appCtx *app.Context) ([]rxtspot.Region, error) {
 func Get(ctx context.Context, appCtx *app.Context, name string) (*rxtspot.Region, error) {
 	return appCtx.Client.GetAPI().GetRegion(ctx, name)
 }
-

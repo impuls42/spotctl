@@ -322,11 +322,11 @@ var spotUpdateCmd = &cobra.Command{
 		}
 
 		var (
-			desiredPtr         *int
-			bidPricePtr        *string
-			customLabels       map[string]string
-			customAnnotations  map[string]string
-			err                error
+			desiredPtr        *int
+			bidPricePtr       *string
+			customLabels      map[string]string
+			customAnnotations map[string]string
+			err               error
 		)
 
 		if cmd.Flags().Changed("desired") {

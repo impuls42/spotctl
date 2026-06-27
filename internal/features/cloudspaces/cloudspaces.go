@@ -215,4 +215,3 @@ func Update(ctx context.Context, appCtx *app.Context, org string, params UpdateP
 
 	return appCtx.Client.GetAPI().GetCloudspace(ctx, org, params.Name)
 }
-

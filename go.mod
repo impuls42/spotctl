@@ -20,7 +20,7 @@ require (
 	github.com/rackspace-spot/spot-go-sdk v0.2.0
 )
 
-replace github.com/rackspace-spot/spot-go-sdk => ../spot-go-sdk
+replace github.com/rackspace-spot/spot-go-sdk => github.com/impuls42/spot-go-sdk v0.3.0
 
 require (
 	github.com/atotto/clipboard v0.1.4 // indirect

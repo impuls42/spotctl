@@ -24,4 +24,3 @@ func GetByName(ctx context.Context, appCtx *app.Context, name string) (any, erro
 	}
 	return nil, fmt.Errorf("organization %q not found", name)
 }
-

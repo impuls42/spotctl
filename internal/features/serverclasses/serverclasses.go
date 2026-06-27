@@ -13,4 +13,3 @@ func List(ctx context.Context, appCtx *app.Context, region string) (any, error) 
 func Get(ctx context.Context, appCtx *app.Context, name string) (any, error) {
 	return appCtx.Client.GetAPI().GetServerClass(ctx, name)
 }
-

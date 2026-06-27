@@ -1,1 +1,15 @@
 .DS_Store
+
+# Build artifacts
+/spotctl
+/spotctl_unix
+/spotctl_darwin
+/spotctl.exe
+/dist/
+
+# Release signing
+cosign.key
+
+# Test/coverage output
+coverage.out
+coverage.html

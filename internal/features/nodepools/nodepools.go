@@ -60,16 +60,16 @@ type SpotCreateParams struct {
 }
 
 type SpotUpdateParams struct {
-	Org                   string            `json:"org,omitempty" jsonschema:"Organization ID; falls back to configured org if empty"`
-	Name                  string            `json:"name" jsonschema:"Spot node pool name (UUID)"`
-	Cloudspace            string            `json:"cloudspace" jsonschema:"Cloudspace name"`
-	Desired               *int              `json:"desired,omitempty" jsonschema:"Desired number of nodes; if omitted, unchanged"`
-	BidPrice              *string           `json:"bidprice,omitempty" jsonschema:"Maximum bid price; if omitted, unchanged"`
-	AutoscalingEnabled    *bool             `json:"autoscaling_enabled,omitempty" jsonschema:"Enable or disable autoscaling; if omitted, unchanged"`
-	AutoscalingMinNodes   *int              `json:"autoscaling_min_nodes,omitempty" jsonschema:"Minimum number of nodes for autoscaling; if omitted, unchanged"`
-	AutoscalingMaxNodes   *int              `json:"autoscaling_max_nodes,omitempty" jsonschema:"Maximum number of nodes for autoscaling; if omitted, unchanged"`
-	CustomLabels          map[string]string `json:"customLabels,omitempty" jsonschema:"Custom labels for the node pool; if omitted, unchanged"`
-	CustomAnnotations     map[string]string `json:"customAnnotations,omitempty" jsonschema:"Custom annotations for the node pool; if omitted, unchanged"`
+	Org                 string            `json:"org,omitempty" jsonschema:"Organization ID; falls back to configured org if empty"`
+	Name                string            `json:"name" jsonschema:"Spot node pool name (UUID)"`
+	Cloudspace          string            `json:"cloudspace" jsonschema:"Cloudspace name"`
+	Desired             *int              `json:"desired,omitempty" jsonschema:"Desired number of nodes; if omitted, unchanged"`
+	BidPrice            *string           `json:"bidprice,omitempty" jsonschema:"Maximum bid price; if omitted, unchanged"`
+	AutoscalingEnabled  *bool             `json:"autoscaling_enabled,omitempty" jsonschema:"Enable or disable autoscaling; if omitted, unchanged"`
+	AutoscalingMinNodes *int              `json:"autoscaling_min_nodes,omitempty" jsonschema:"Minimum number of nodes for autoscaling; if omitted, unchanged"`
+	AutoscalingMaxNodes *int              `json:"autoscaling_max_nodes,omitempty" jsonschema:"Maximum number of nodes for autoscaling; if omitted, unchanged"`
+	CustomLabels        map[string]string `json:"customLabels,omitempty" jsonschema:"Custom labels for the node pool; if omitted, unchanged"`
+	CustomAnnotations   map[string]string `json:"customAnnotations,omitempty" jsonschema:"Custom annotations for the node pool; if omitted, unchanged"`
 }
 
 type SpotDeleteParams struct {
@@ -280,15 +280,15 @@ type OnDemandCreateParams struct {
 }
 
 type OnDemandUpdateParams struct {
-	Org                   string            `json:"org,omitempty" jsonschema:"Organization ID; falls back to configured org if empty"`
-	Name                  string            `json:"name" jsonschema:"On-demand node pool name (UUID)"`
-	Cloudspace            string            `json:"cloudspace" jsonschema:"Cloudspace name"`
-	Desired               *int              `json:"desired,omitempty" jsonschema:"Desired number of nodes; if omitted, unchanged"`
-	AutoscalingEnabled    *bool             `json:"autoscaling_enabled,omitempty" jsonschema:"Enable or disable autoscaling; if omitted, unchanged"`
-	AutoscalingMinNodes   *int              `json:"autoscaling_min_nodes,omitempty" jsonschema:"Minimum number of nodes for autoscaling; if omitted, unchanged"`
-	AutoscalingMaxNodes   *int              `json:"autoscaling_max_nodes,omitempty" jsonschema:"Maximum number of nodes for autoscaling; if omitted, unchanged"`
-	CustomLabels          map[string]string `json:"customLabels,omitempty" jsonschema:"Custom labels for the node pool; if omitted, unchanged"`
-	CustomAnnotations     map[string]string `json:"customAnnotations,omitempty" jsonschema:"Custom annotations for the node pool; if omitted, unchanged"`
+	Org                 string            `json:"org,omitempty" jsonschema:"Organization ID; falls back to configured org if empty"`
+	Name                string            `json:"name" jsonschema:"On-demand node pool name (UUID)"`
+	Cloudspace          string            `json:"cloudspace" jsonschema:"Cloudspace name"`
+	Desired             *int              `json:"desired,omitempty" jsonschema:"Desired number of nodes; if omitted, unchanged"`
+	AutoscalingEnabled  *bool             `json:"autoscaling_enabled,omitempty" jsonschema:"Enable or disable autoscaling; if omitted, unchanged"`
+	AutoscalingMinNodes *int              `json:"autoscaling_min_nodes,omitempty" jsonschema:"Minimum number of nodes for autoscaling; if omitted, unchanged"`
+	AutoscalingMaxNodes *int              `json:"autoscaling_max_nodes,omitempty" jsonschema:"Maximum number of nodes for autoscaling; if omitted, unchanged"`
+	CustomLabels        map[string]string `json:"customLabels,omitempty" jsonschema:"Custom labels for the node pool; if omitted, unchanged"`
+	CustomAnnotations   map[string]string `json:"customAnnotations,omitempty" jsonschema:"Custom annotations for the node pool; if omitted, unchanged"`
 }
 
 type OnDemandDeleteParams struct {
@@ -427,4 +427,3 @@ func OnDemandDelete(ctx context.Context, appCtx *app.Context, params OnDemandDel
 	}
 	return appCtx.Client.GetAPI().DeleteOnDemandNodePool(ctx, org, params.Name)
 }
-

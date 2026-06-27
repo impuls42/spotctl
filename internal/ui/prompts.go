@@ -20,10 +20,10 @@ var (
 
 // SelectModel manages the state for a select prompt
 type SelectModel struct {
-	choices  []string
-	cursor  int
-	selected map[int]struct{}
-	done    bool
+	choices   []string
+	cursor    int
+	selected  map[int]struct{}
+	done      bool
 	cancelled bool
 }
 
@@ -120,7 +120,7 @@ func (m SelectModel) Cancelled() bool {
 // InputModel manages the state for a text input prompt
 type InputModel struct {
 	textInput textinput.Model
-	done     bool
+	done      bool
 	cancelled bool
 }
 
@@ -139,7 +139,7 @@ func NewInputModel(prompt, defaultValue string, isPassword bool) InputModel {
 
 	return InputModel{
 		textInput: ti,
-		done:     false,
+		done:      false,
 	}
 }
 
@@ -186,9 +186,9 @@ func (m InputModel) Cancelled() bool {
 
 // ConfirmModel manages the state for a confirmation prompt
 type ConfirmModel struct {
-	prompt string
-	result bool
-	done   bool
+	prompt    string
+	result    bool
+	done      bool
 	cancelled bool
 }
 

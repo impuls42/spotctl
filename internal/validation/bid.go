@@ -90,7 +90,7 @@ func ValidateServerClassForSpotBidding(ctx context.Context, appCtx *app.Context,
 	// Check if it's a map or a struct. For now, we'll handle the case where it should be a
 	// Rackspace API struct. We need to inspect the actual response type.
 	// For simplicity, we can try to access it as a map[string]interface{} or use reflection.
-	
+
 	scMap, ok := sc.(map[string]interface{})
 	if !ok {
 		// If it's not a map, return a generic success since we can't validate

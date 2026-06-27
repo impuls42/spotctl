@@ -12,14 +12,14 @@ import (
 
 // PriceHistoryPoint represents a single price history data point
 type PriceHistoryPoint struct {
-	RunAt        int64   `json:"run_at"`        // Unix timestamp of the auction
-	HammerPrice  float64 `json:"hammer_price"` // Final clearing price in USD
+	RunAt       int64   `json:"run_at"`       // Unix timestamp of the auction
+	HammerPrice float64 `json:"hammer_price"` // Final clearing price in USD
 }
 
 // PriceHistory represents the price history response for a server class
 type PriceHistory struct {
-	Auction string               `json:"auction"` // Server class name
-	History []PriceHistoryPoint  `json:"history"`
+	Auction string              `json:"auction"` // Server class name
+	History []PriceHistoryPoint `json:"history"`
 }
 
 // PercentilesData represents the percentile distribution response
@@ -29,7 +29,7 @@ type PercentilesData map[string]interface{}
 type ComparablePricesData map[string]interface{}
 
 const (
-	s3BaseURL = "https://ngpc-prod-public-data.s3.us-east-2.amazonaws.com"
+	s3BaseURL   = "https://ngpc-prod-public-data.s3.us-east-2.amazonaws.com"
 	httpTimeout = 30 * time.Second
 )
 
